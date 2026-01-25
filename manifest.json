@@ -1,0 +1,23 @@
+{
+    "name": "Web Local LLM",
+    "short_name": "Local LLM",
+    "description": "Privacy-focused AI chat that runs entirely in your browser.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#111827",
+    "theme_color": "#111827",
+    "icons": [
+        {
+            "src": "/icon.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/icon.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        }
+    ]
+}
