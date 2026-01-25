@@ -10,7 +10,7 @@
   <link rel="manifest" href="./manifest.json" />
   <link rel="apple-touch-icon" href="./icon.png" />
   <title>Web Local LLM</title>
-  <script type="module" crossorigin src="/Web-Local-LLM/assets/index-DiIQi7cr.js"></script>
+  <script type="module" crossorigin src="/Web-Local-LLM/assets/index-Bd5HETVi.js"></script>
   <link rel="stylesheet" crossorigin href="/Web-Local-LLM/assets/index-GMs24dhM.css">
 </head>
 
@@ -19,11 +19,17 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        // Register merged SW. It handles both caching and COI headers.
         navigator.serviceWorker.register('./sw.js')
           .then(reg => {
             console.log('Service Worker registered', reg);
-            // Check if COI is active. If not, reload might be needed (handled by SW usually)
+            // If SharedArrayBuffer is not available, we need COI headers active.
+            // A reload might be necessary after the first SW registration.
+            if (!window.crossOriginIsolated && !window.location.search.includes('reloaded')) {
+              console.log('SharedArrayBuffer not available, reloading to activate SW headers...');
+              setTimeout(() => {
+                window.location.search += (window.location.search ? '&' : '?') + 'reloaded=true';
+              }, 500);
+            }
           })
           .catch(err => console.error('Service Worker registration failed', err));
       });

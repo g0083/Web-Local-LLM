@@ -42,12 +42,12 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
         fetch(event.request)
             .then((response) => {
-                if (response.status === 0 || !response.ok) {
-                    // Fallback to cache for assets if offline
+                // If the response is not valid, try cache fallback
+                if (!response || response.status === 0) {
                     return caches.match(event.request).then(cached => cached || response);
                 }
 
-                // Add isolation headers to every response
+                // Add isolation headers to every response to ensure SharedArrayBuffer works
                 const newHeaders = new Headers(response.headers);
                 newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
                 newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
