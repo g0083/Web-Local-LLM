@@ -19,9 +19,12 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        // Use relative path for GitHub Pages
+        // Register merged SW. It handles both caching and COI headers.
         navigator.serviceWorker.register('./sw.js')
-          .then(reg => console.log('Service Worker registered', reg))
+          .then(reg => {
+            console.log('Service Worker registered', reg);
+            // Check if COI is active. If not, reload might be needed (handled by SW usually)
+          })
           .catch(err => console.error('Service Worker registration failed', err));
       });
     }
