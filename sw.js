@@ -1,9 +1,9 @@
 const CACHE_NAME = 'web-local-llm-v1';
 const ASSETS_TO_CACHE = [
-    '/',
-    '/index.html',
-    '/manifest.json',
-    '/icon.png'
+    './',
+    './index.html',
+    './manifest.json',
+    './icon.png'
 ];
 
 self.addEventListener('install', (event) => {
