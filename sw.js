@@ -24,7 +24,7 @@ self.addEventListener('activate', (event) => {
         caches.keys().then((cacheNames) => {
             return Promise.all(
                 cacheNames.map((cacheName) => {
-                    if (cacheName !== CACHE_NAME) {
+                    if (cacheName !== CACHE_NAME && cacheName !== 'wllama') {
                         return caches.delete(cacheName);
                     }
                 })
@@ -60,7 +60,9 @@ self.addEventListener('fetch', (event) => {
             })
             .catch(() => {
                 // Network failure - try cache
-                return caches.match(event.request);
+                return caches.match(event.request).then(response => {
+                    return response || new Response("Not Found", { status: 404, statusText: "Not Found" });
+                });
             })
     );
 });
