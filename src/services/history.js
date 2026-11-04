@@ -71,10 +71,10 @@ export const setUserConfig = async (config) => {
 // Default model configuration
 const DEFAULT_MODEL_CONFIG = {
     n_ctx: 4096,
-    n_batch: 512,
-    n_gpu_layers: -1, // -1: offload all layers to WebGPU when available
-    cache_type_k: 'q8_0',
-    cache_type_v: 'q8_0',
+    n_batch: 256,
+    n_gpu_layers: 99, // 99: offload all layers to WebGPU
+    cache_type_k: 'f16', // f16: native WebGPU shader format (q8_0 causes CPU fallback)
+    cache_type_v: 'f16',
     flash_attn: true,
     n_threads: typeof navigator !== 'undefined' ? Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 8)) : 4,
     model_url: MODEL_URLS.lfm2_thinking,
@@ -211,15 +211,16 @@ export const clearAllSessions = async () => {
 export const getModelConfig = async () => {
     const config = await localforage.getItem(MODEL_CONFIG_KEY);
     // Migrate old defaults or unsupported lfm3 to lfm2_thinking
-    if (!config || config.model_name === 'lfm3' || config.model_name === 'lfm3_fast' || (config.model_url && config.model_url.includes('LFM3')) || config.model_name === 'thinking' || config.model_name === 'instruct') {
+    if (!config || config.model_name === 'lfm3' || config.model_name === 'lfm3_fast' || (config.model_url && config.model_url.includes('LFM3')) || config.model_name === 'thinking' || config.model_name === 'instruct' || config.n_gpu_layers === -1 || config.cache_type_k === 'q8_0') {
         const migrated = {
             ...DEFAULT_MODEL_CONFIG,
             ...(config || {}),
             model_name: 'lfm2_thinking',
             model_url: MODEL_URLS.lfm2_thinking,
-            n_gpu_layers: -1,
-            cache_type_k: 'q8_0',
-            cache_type_v: 'q8_0',
+            n_gpu_layers: 99,
+            cache_type_k: 'f16',
+            cache_type_v: 'f16',
+            n_batch: 256,
             flash_attn: true,
             n_ctx: 4096
         };

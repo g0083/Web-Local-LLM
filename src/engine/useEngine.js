@@ -264,15 +264,14 @@ export function useEngine(skipInit = false) {
     useEffect(() => {
         if (!currentSessionId || messages.length !== 2 || isTitleGenerating) return;
 
-        // Check title directly from IndexedDB to avoid re-triggering from sessions state changes
-        loadSessionData(currentSessionId).then(sessionData => {
-            if (!sessionData) return;
-            const autoTitleCandidates = ['New Chat', t('chat.newSession')];
-            if (autoTitleCandidates.some(candidate => sessionData.title === candidate || sessionData.title.startsWith(candidate))) {
-                generateTitle(messages);
-            }
-        });
-    }, [messages.length, currentSessionId]);
+        // Check title safely from sessions list
+        const currentMeta = sessions.find(s => s.id === currentSessionId);
+        const title = currentMeta?.title || 'New Chat';
+        const autoTitleCandidates = ['New Chat', t('chat.newSession'), 'Legacy Session'];
+        if (autoTitleCandidates.some(candidate => title === candidate || (typeof title === 'string' && title.startsWith(candidate)))) {
+            generateTitle(messages);
+        }
+    }, [messages.length, currentSessionId, sessions, isTitleGenerating]);
 
     useEffect(() => {
         const handler = () => refreshSessionList();

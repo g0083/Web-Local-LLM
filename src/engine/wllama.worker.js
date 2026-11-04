@@ -160,15 +160,17 @@ async function initialize(modelConfig = {}) {
 
     const nThreads = modelConfig.n_threads || (typeof navigator !== 'undefined' ? Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 8)) : 4);
     const nCtx = modelConfig.n_ctx || 4096;
-    const nGpuLayers = modelConfig.n_gpu_layers ?? -1;
+    let nGpuLayers = modelConfig.n_gpu_layers ?? 99;
+    if (nGpuLayers < 0) nGpuLayers = 99; // Ensure WebGPU layer offloading
+    const cacheType = (modelConfig.cache_type_k === 'q8_0' || !modelConfig.cache_type_k) ? 'f16' : modelConfig.cache_type_k;
 
     try {
         await wllama.loadModelFromUrl(modelUrl, {
             n_ctx: nCtx,
-            n_batch: modelConfig.n_batch || 512,
+            n_batch: modelConfig.n_batch || 256,
             n_gpu_layers: nGpuLayers,
-            cache_type_k: modelConfig.cache_type_k || 'q8_0',
-            cache_type_v: modelConfig.cache_type_v || 'q8_0',
+            cache_type_k: cacheType,
+            cache_type_v: cacheType,
             flash_attn: modelConfig.flash_attn ?? true,
             n_threads: nThreads,
             useCache: true,
@@ -292,18 +294,45 @@ async function runCompletion(messages, config, jobId) {
                 abortSignal: abortController.signal,
             });
 
+            let isInReasoning = false;
             for await (const chunk of stream) {
                 if (abortController.signal.aborted) break;
 
-                const delta = chunk.choices[0]?.delta?.content;
-                if (delta) {
+                const choice = chunk.choices?.[0];
+                const delta = choice?.delta;
+                const reasoningText = delta?.reasoning_content;
+                const contentText = delta?.content;
+
+                let tokenPiece = '';
+
+                if (reasoningText) {
+                    if (!isInReasoning) {
+                        isInReasoning = true;
+                        tokenPiece += '<think>\n';
+                    }
+                    tokenPiece += reasoningText;
+                } else if (contentText) {
+                    if (isInReasoning) {
+                        isInReasoning = false;
+                        tokenPiece += '\n</think>\n\n';
+                    }
+                    tokenPiece += contentText;
+                }
+
+                if (tokenPiece) {
                     if (nTokens === 0) {
                         firstTokenTime = performance.now();
                     }
                     nTokens++;
-                    fullResponse += delta;
-                    postMessage({ type: 'token', data: { token: delta, jobId } });
+                    fullResponse += tokenPiece;
+                    postMessage({ type: 'token', data: { token: tokenPiece, jobId } });
                 }
+            }
+
+            if (isInReasoning) {
+                const closeTag = '\n</think>\n\n';
+                fullResponse += closeTag;
+                postMessage({ type: 'token', data: { token: closeTag, jobId } });
             }
         } else {
             // Model does not have an embedded jinja chat template (e.g. Liquid LFM2.5).

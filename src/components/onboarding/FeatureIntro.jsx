@@ -38,6 +38,14 @@ const FeatureIntro = ({ onComplete, onSkip, generateIntro }) => {
             });
             console.log('[FeatureIntro] Intro generation complete');
             setIsGenerating(false);
+            setIntroText(prev => {
+                if (!prev || !prev.trim()) {
+                    return language === 'ja'
+                        ? 'Web Local LLMへようこそ！このアプリはブラウザ内で完全にローカルに動作するAIチャットアプリです。データは外部に送信されず、プライバシーが保護されます。複数のモデルから選択でき、オフラインでも動作します。'
+                        : 'Welcome to Web Local LLM! This app runs entirely locally in your browser, ensuring your privacy. Choose from multiple models, customize settings, and chat offline.';
+                }
+                return prev;
+            });
             setIsComplete(true);
         } catch (error) {
             console.error('[FeatureIntro] Failed to generate introduction:', error);

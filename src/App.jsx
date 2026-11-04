@@ -258,7 +258,7 @@ function App() {
                 temperature: 0.7,
                 topP: 0.9,
                 topK: 40,
-                maxTokens: 512
+                maxTokens: 1024
               },
               jobId: 'intro_gen'
             }
