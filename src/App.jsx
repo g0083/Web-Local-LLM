@@ -107,8 +107,12 @@ function App() {
           isResolved = true;
           downloadWorker.removeEventListener('message', handleMessage);
           downloadWorker.removeEventListener('error', handleError);
-          downloadWorker.terminate();
-          downloadLockRef.current = false;
+          setTimeout(() => {
+            try {
+              downloadWorker.terminate();
+            } catch (_) {}
+            downloadLockRef.current = false;
+          }, 100);
         }
       };
 

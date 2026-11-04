@@ -1,4 +1,4 @@
-﻿// Polyfill for document in worker if needed
+// Polyfill for document in worker if needed
 if (typeof document === 'undefined') {
     self.document = {
         baseURI: self.location.href
@@ -349,6 +349,19 @@ self.onmessage = async (e) => {
                 }
                 break;
 
+            case 'check_cache': {
+                try {
+                    const instance = getWllamaInstance();
+                    const entries = await instance.cacheManager.list();
+                    const cachedUrls = entries.map(e => e.metadata?.originalURL).filter(Boolean);
+                    postMessage({ type: 'cache_status', cachedUrls });
+                } catch (err) {
+                    console.warn('[Worker] Failed to check cache status:', err);
+                    postMessage({ type: 'cache_status', cachedUrls: [] });
+                }
+                break;
+            }
+
             case 'download': {
                 const { url } = data || e.data;
                 if (!url) throw new Error('Download URL required');
@@ -356,21 +369,48 @@ self.onmessage = async (e) => {
                 downloadAbortController = new AbortController();
                 const instance = getWllamaInstance();
 
-                await instance.modelManager.downloadModel(
-                    { url },
-                    {
-                        signal: downloadAbortController.signal,
-                        progressCallback: ({ loaded, total }) => {
-                            const percentage = total > 0 ? Math.round((loaded / total) * 100) : 0;
-                            postMessage({
-                                type: 'progress',
-                                loaded,
-                                total,
-                                percentage
-                            });
+                let retries = 4;
+                let lastErr = null;
+
+                while (retries > 0) {
+                    try {
+                        await instance.modelManager.downloadModel(
+                            { url },
+                            {
+                                signal: downloadAbortController.signal,
+                                progressCallback: ({ loaded, total }) => {
+                                    const percentage = total > 0 ? Math.round((loaded / total) * 100) : 0;
+                                    postMessage({
+                                        type: 'progress',
+                                        loaded,
+                                        total,
+                                        percentage
+                                    });
+                                }
+                            }
+                        );
+                        lastErr = null;
+                        break;
+                    } catch (err) {
+                        lastErr = err;
+                        if (downloadAbortController.signal.aborted) {
+                            break;
+                        }
+                        const isLockError = err.message && (
+                            err.message.includes('createSyncAccessHandle') ||
+                            err.message.includes('Access Handles cannot be created')
+                        );
+                        if (isLockError && retries > 1) {
+                            console.warn(`[Worker] OPFS lock contention, retrying in 400ms... (${retries - 1} left)`);
+                            await new Promise(r => setTimeout(r, 400));
+                            retries--;
+                        } else {
+                            throw err;
                         }
                     }
-                );
+                }
+
+                if (lastErr) throw lastErr;
 
                 postMessage({ type: 'download_complete', url });
                 break;

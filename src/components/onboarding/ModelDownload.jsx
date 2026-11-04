@@ -20,60 +20,59 @@ const ModelDownload = ({ onContinue, onDownloadModel }) => {
 
     const [errorMessage, setErrorMessage] = useState('');
 
-    // Check if models are already cached on mount using OPFS check
+    // Check if models are already cached on mount via worker (avoid main-thread OPFS lock conflicts)
     useEffect(() => {
         let isMounted = true;
-        const checkCache = async () => {
-            console.log('[ModelDownload] Checking OPFS cache for models');
-            let lfm3InCache = false;
+        const checkCacheWorker = new Worker(
+            new URL('../../engine/wllama.worker.js', import.meta.url),
+            { type: 'module' }
+        );
 
-            try {
-                // Check OPFS cache directory if available
-                if (typeof navigator !== 'undefined' && navigator.storage?.getDirectory) {
-                    const root = await navigator.storage.getDirectory();
-                    const cacheDir = await root.getDirectoryHandle('cache', { create: false }).catch(() => null);
-                    if (cacheDir) {
-                        const cachedFiles = [];
-                        // @ts-ignore
-                        for await (const [name, handle] of cacheDir.entries()) {
-                            if (handle.kind === 'file') {
-                                cachedFiles.push(name);
-                            }
-                        }
-
-                        for (const [modelType, modelUrl] of Object.entries(MODEL_URLS)) {
-                            // Check if any cache entry references this model URL
-                            for (const name of cachedFiles) {
-                                if (name.startsWith('__metadata__')) {
-                                    try {
-                                        const fh = await cacheDir.getFileHandle(name);
-                                        const f = await fh.getFile();
-                                        const metaText = await f.text();
-                                        if (metaText.includes(modelUrl)) {
-                                            if (isMounted) {
-                                                setDownloadStatus(prev => ({ ...prev, [modelType]: 'downloaded' }));
-                                            }
-                                            if (modelType === 'lfm3') lfm3InCache = true;
-                                            break;
-                                        }
-                                    } catch (_) {}
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (error) {
-                console.warn('[ModelDownload] Error checking OPFS cache:', error);
+        checkCacheWorker.onmessage = (e) => {
+            if (!isMounted) {
+                checkCacheWorker.terminate();
+                return;
             }
 
-            // Auto-start lfm3 download if not in cache
-            if (isMounted && !lfm3InCache && downloadStatus.lfm3 === 'idle') {
-                handleDownload('lfm3');
+            if (e.data.type === 'cache_status') {
+                const cachedUrls = e.data.cachedUrls || [];
+                console.log('[ModelDownload] Cached URLs from worker:', cachedUrls);
+                let lfm3InCache = false;
+
+                for (const [modelType, modelUrl] of Object.entries(MODEL_URLS)) {
+                    if (cachedUrls.some(url => url.includes(modelUrl) || modelUrl.includes(url))) {
+                        setDownloadStatus(prev => ({ ...prev, [modelType]: 'downloaded' }));
+                        if (modelType === 'lfm3') lfm3InCache = true;
+                    }
+                }
+
+                checkCacheWorker.terminate();
+
+                // Auto-start lfm3 download ONLY if not already cached
+                if (!lfm3InCache) {
+                    setTimeout(() => {
+                        if (isMounted) {
+                            handleDownload('lfm3');
+                        }
+                    }, 200);
+                }
             }
         };
 
-        checkCache();
-        return () => { isMounted = false; };
+        checkCacheWorker.onerror = (err) => {
+            console.warn('[ModelDownload] Cache check worker error:', err);
+            checkCacheWorker.terminate();
+            if (isMounted) {
+                setTimeout(() => handleDownload('lfm3'), 200);
+            }
+        };
+
+        checkCacheWorker.postMessage({ type: 'check_cache' });
+
+        return () => {
+            isMounted = false;
+            checkCacheWorker.terminate();
+        };
     }, []);
 
     const handleModelToggle = (modelType) => {
