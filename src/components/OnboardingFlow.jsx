@@ -27,13 +27,13 @@ const OnboardingFlow = ({ onComplete, generateIntro, onDownloadModel }) => {
         setDownloadedModels(models);
         await setSelectedModels(models);
 
-        // Default to lfm3 if available, otherwise first selected model
-        const defaultModel = models.includes('lfm3') ? 'lfm3' : models[0] || 'lfm3';
+        // Default to lfm2_thinking if available, otherwise first selected model
+        const defaultModel = models.includes('lfm2_thinking') ? 'lfm2_thinking' : models[0] || 'lfm2_thinking';
         console.log(`[OnboardingFlow] Setting default model to: ${defaultModel}`);
 
         await setModelConfig({
             model_name: defaultModel,
-            model_url: MODEL_URLS[defaultModel] || MODEL_URLS.lfm3
+            model_url: MODEL_URLS[defaultModel] || MODEL_URLS.lfm2_thinking
         });
 
         // Proceed to intro

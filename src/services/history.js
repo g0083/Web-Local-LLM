@@ -1,4 +1,4 @@
-﻿import localforage from 'localforage';
+import localforage from 'localforage';
 import { v4 as uuidv4 } from 'uuid';
 
 const META_KEY = 'sessions_meta_v1';
@@ -14,9 +14,10 @@ const SELECTED_MODELS_KEY = 'selected_models_v1';
 
 // Initial Model Configuration (Global)
 export const MODEL_URLS = {
-    lfm3: 'https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/resolve/main/LFM3-1.7B-Q4_K_M.gguf?download=true',
-    lfm3_fast: 'https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/resolve/main/LFM3-1.7B-QAD-Q4_0.gguf?download=true',
-    // Backwards compatibility for previously downloaded models
+    lfm2_thinking: 'https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF/resolve/main/LFM2.5-1.2B-Thinking-Q4_K_M.gguf?download=true',
+    lfm2_instruct: 'https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/main/LFM2.5-1.2B-Instruct-Q4_K_M.gguf?download=true',
+    qwen25_15b: 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true',
+    // Backwards compatibility for previously downloaded models / aliases
     thinking: 'https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF/resolve/main/LFM2.5-1.2B-Thinking-Q4_K_M.gguf?download=true',
     instruct: 'https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/main/LFM2.5-1.2B-Instruct-Q4_K_M.gguf?download=true'
 };
@@ -76,8 +77,8 @@ const DEFAULT_MODEL_CONFIG = {
     cache_type_v: 'q8_0',
     flash_attn: true,
     n_threads: typeof navigator !== 'undefined' ? Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 8)) : 4,
-    model_url: MODEL_URLS.lfm3,
-    model_name: 'lfm3'
+    model_url: MODEL_URLS.lfm2_thinking,
+    model_name: 'lfm2_thinking'
 };
 
 localforage.config({
@@ -209,13 +210,13 @@ export const clearAllSessions = async () => {
 
 export const getModelConfig = async () => {
     const config = await localforage.getItem(MODEL_CONFIG_KEY);
-    // Migrate old defaults (thinking / instruct / LFM2.5) to LFM3
-    if (!config || config.model_name === 'thinking' || config.model_name === 'instruct' || !config.model_url || config.model_url.includes('LFM2.5')) {
+    // Migrate old defaults or unsupported lfm3 to lfm2_thinking
+    if (!config || config.model_name === 'lfm3' || config.model_name === 'lfm3_fast' || (config.model_url && config.model_url.includes('LFM3')) || config.model_name === 'thinking' || config.model_name === 'instruct') {
         const migrated = {
             ...DEFAULT_MODEL_CONFIG,
             ...(config || {}),
-            model_name: 'lfm3',
-            model_url: MODEL_URLS.lfm3,
+            model_name: 'lfm2_thinking',
+            model_url: MODEL_URLS.lfm2_thinking,
             n_gpu_layers: -1,
             cache_type_k: 'q8_0',
             cache_type_v: 'q8_0',

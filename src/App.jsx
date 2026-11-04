@@ -173,8 +173,8 @@ function App() {
       modelUrl = MODEL_URLS[targetModelName];
     } else {
       const config = await getModelConfig();
-      modelName = config.model_name || 'lfm3';
-      modelUrl = config.model_url || MODEL_URLS[modelName] || MODEL_URLS.lfm3;
+      modelName = config.model_name || 'lfm2_thinking';
+      modelUrl = config.model_url || MODEL_URLS[modelName] || MODEL_URLS.lfm2_thinking;
     }
 
     if (!confirm(t('chat.redownloadConfirm') + ` (${modelName})`)) return;

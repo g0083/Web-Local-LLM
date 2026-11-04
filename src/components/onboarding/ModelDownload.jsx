@@ -4,18 +4,18 @@ import { MODEL_URLS } from '../../services/history';
 
 const ModelDownload = ({ onContinue, onDownloadModel }) => {
     const [selectedModels, setSelectedModels] = useState({
-        lfm3: true,
-        lfm3_fast: false
+        lfm2_thinking: true,
+        qwen25_15b: false
     });
 
     const [downloadStatus, setDownloadStatus] = useState({
-        lfm3: 'idle',
-        lfm3_fast: 'idle'
+        lfm2_thinking: 'idle',
+        qwen25_15b: 'idle'
     });
 
     const [downloadProgress, setDownloadProgress] = useState({
-        lfm3: { loaded: 0, total: 0, percentage: 0 },
-        lfm3_fast: { loaded: 0, total: 0, percentage: 0 }
+        lfm2_thinking: { loaded: 0, total: 0, percentage: 0 },
+        qwen25_15b: { loaded: 0, total: 0, percentage: 0 }
     });
 
     const [errorMessage, setErrorMessage] = useState('');
@@ -37,22 +37,22 @@ const ModelDownload = ({ onContinue, onDownloadModel }) => {
             if (e.data.type === 'cache_status') {
                 const cachedUrls = e.data.cachedUrls || [];
                 console.log('[ModelDownload] Cached URLs from worker:', cachedUrls);
-                let lfm3InCache = false;
+                let lfmInCache = false;
 
                 for (const [modelType, modelUrl] of Object.entries(MODEL_URLS)) {
                     if (cachedUrls.some(url => url.includes(modelUrl) || modelUrl.includes(url))) {
                         setDownloadStatus(prev => ({ ...prev, [modelType]: 'downloaded' }));
-                        if (modelType === 'lfm3') lfm3InCache = true;
+                        if (modelType === 'lfm2_thinking' || modelType === 'thinking') lfmInCache = true;
                     }
                 }
 
                 checkCacheWorker.terminate();
 
-                // Auto-start lfm3 download ONLY if not already cached
-                if (!lfm3InCache) {
+                // Auto-start lfm2_thinking download ONLY if not already cached
+                if (!lfmInCache) {
                     setTimeout(() => {
                         if (isMounted) {
-                            handleDownload('lfm3');
+                            handleDownload('lfm2_thinking');
                         }
                     }, 200);
                 }
@@ -63,7 +63,7 @@ const ModelDownload = ({ onContinue, onDownloadModel }) => {
             console.warn('[ModelDownload] Cache check worker error:', err);
             checkCacheWorker.terminate();
             if (isMounted) {
-                setTimeout(() => handleDownload('lfm3'), 200);
+                setTimeout(() => handleDownload('lfm2_thinking'), 200);
             }
         };
 
@@ -185,35 +185,35 @@ const ModelDownload = ({ onContinue, onDownloadModel }) => {
                 </div>
 
                 <div className="model-options">
-                    {/* Primary Model: LFM3 1.7B */}
-                    <div className={`model-card ${selectedModels.lfm3 ? 'selected' : ''}`}>
+                    {/* Primary Model: LFM2.5 1.2B Thinking */}
+                    <div className={`model-card ${selectedModels.lfm2_thinking ? 'selected' : ''}`}>
                         <div className="model-card-header">
                             <input
                                 type="checkbox"
-                                id="lfm3-model"
-                                checked={selectedModels.lfm3}
-                                onChange={() => handleModelToggle('lfm3')}
+                                id="lfm2-thinking-model"
+                                checked={selectedModels.lfm2_thinking}
+                                onChange={() => handleModelToggle('lfm2_thinking')}
                                 className="model-checkbox"
                             />
-                            <label htmlFor="lfm3-model" className="model-name">
-                                {t('modelDownload.lfm3Model')} <span className="model-size">{t('modelDownload.lfm3Size')}</span>
+                            <label htmlFor="lfm2-thinking-model" className="model-name">
+                                {t('modelDownload.lfm2ThinkingModel')} <span className="model-size">{t('modelDownload.lfm2ThinkingSize')}</span>
                             </label>
                         </div>
-                        <p className="model-description">{t('modelDownload.lfm3Desc')}</p>
-                        {renderProgressBar('lfm3')}
+                        <p className="model-description">{t('modelDownload.lfm2ThinkingDesc')}</p>
+                        {renderProgressBar('lfm2_thinking')}
                         <div className="model-buttons">
                             <button
-                                className={`model-download-btn ${downloadStatus.lfm3 === 'downloaded' ? 'downloaded' : ''}`}
-                                onClick={() => handleDownload('lfm3')}
-                                disabled={downloadStatus.lfm3 === 'downloading' || downloadStatus.lfm3 === 'downloaded'}
+                                className={`model-download-btn ${downloadStatus.lfm2_thinking === 'downloaded' ? 'downloaded' : ''}`}
+                                onClick={() => handleDownload('lfm2_thinking')}
+                                disabled={downloadStatus.lfm2_thinking === 'downloading' || downloadStatus.lfm2_thinking === 'downloaded'}
                             >
-                                {getButtonText('lfm3')}
+                                {getButtonText('lfm2_thinking')}
                             </button>
-                            {showRedownloadButton('lfm3') && (
+                            {showRedownloadButton('lfm2_thinking') && (
                                 <button
                                     className="model-redownload-btn"
-                                    onClick={() => handleRedownload('lfm3')}
-                                    disabled={downloadStatus.lfm3 === 'downloading'}
+                                    onClick={() => handleRedownload('lfm2_thinking')}
+                                    disabled={downloadStatus.lfm2_thinking === 'downloading'}
                                 >
                                     🔄 {t('modelDownload.redownload')}
                                 </button>
@@ -221,35 +221,35 @@ const ModelDownload = ({ onContinue, onDownloadModel }) => {
                         </div>
                     </div>
 
-                    {/* Secondary Model: LFM3 1.7B Fast */}
-                    <div className={`model-card ${selectedModels.lfm3_fast ? 'selected' : ''}`}>
+                    {/* Secondary Model: Qwen 2.5 1.5B Instruct */}
+                    <div className={`model-card ${selectedModels.qwen25_15b ? 'selected' : ''}`}>
                         <div className="model-card-header">
                             <input
                                 type="checkbox"
-                                id="lfm3-fast-model"
-                                checked={selectedModels.lfm3_fast}
-                                onChange={() => handleModelToggle('lfm3_fast')}
+                                id="qwen25-15b-model"
+                                checked={selectedModels.qwen25_15b}
+                                onChange={() => handleModelToggle('qwen25_15b')}
                                 className="model-checkbox"
                             />
-                            <label htmlFor="lfm3-fast-model" className="model-name">
-                                {t('modelDownload.lfm3FastModel')} <span className="model-size">{t('modelDownload.lfm3FastSize')}</span>
+                            <label htmlFor="qwen25-15b-model" className="model-name">
+                                {t('modelDownload.qwen25Model')} <span className="model-size">{t('modelDownload.qwen25Size')}</span>
                             </label>
                         </div>
-                        <p className="model-description">{t('modelDownload.lfm3FastDesc')}</p>
-                        {renderProgressBar('lfm3_fast')}
+                        <p className="model-description">{t('modelDownload.qwen25Desc')}</p>
+                        {renderProgressBar('qwen25_15b')}
                         <div className="model-buttons">
                             <button
-                                className={`model-download-btn ${downloadStatus.lfm3_fast === 'downloaded' ? 'downloaded' : ''}`}
-                                onClick={() => handleDownload('lfm3_fast')}
-                                disabled={!selectedModels.lfm3_fast || downloadStatus.lfm3_fast === 'downloading' || downloadStatus.lfm3_fast === 'downloaded'}
+                                className={`model-download-btn ${downloadStatus.qwen25_15b === 'downloaded' ? 'downloaded' : ''}`}
+                                onClick={() => handleDownload('qwen25_15b')}
+                                disabled={!selectedModels.qwen25_15b || downloadStatus.qwen25_15b === 'downloading' || downloadStatus.qwen25_15b === 'downloaded'}
                             >
-                                {getButtonText('lfm3_fast')}
+                                {getButtonText('qwen25_15b')}
                             </button>
-                            {showRedownloadButton('lfm3_fast') && (
+                            {showRedownloadButton('qwen25_15b') && (
                                 <button
                                     className="model-redownload-btn"
-                                    onClick={() => handleRedownload('lfm3_fast')}
-                                    disabled={downloadStatus.lfm3_fast === 'downloading'}
+                                    onClick={() => handleRedownload('qwen25_15b')}
+                                    disabled={downloadStatus.qwen25_15b === 'downloading'}
                                 >
                                     🔄 {t('modelDownload.redownload')}
                                 </button>

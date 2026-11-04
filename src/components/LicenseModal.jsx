@@ -39,28 +39,28 @@ export default function LicenseModal({ isOpen, onClose }) {
                         <h4 style={{ color: 'var(--color-accent)', marginBottom: '12px' }}>🤖 AI Models</h4>
 
                         <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
-                            <h5 style={{ margin: '0 0 8px' }}>LFM3-1.7B (Default)</h5>
+                            <h5 style={{ margin: '0 0 8px' }}>LFM2.5-1.2B (Thinking / Instruct)</h5>
                             <p style={{ margin: '0 0 4px', fontSize: '0.9rem', color: 'var(--color-text-muted)' }}>
-                                Tri-hybrid model by <strong>Liquid AI</strong> (Integrated Thinking & Chat)
+                                Efficient hybrid model by <strong>Liquid AI</strong>
                             </p>
                             <a
-                                href="https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF"
+                                href="https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 style={{ fontSize: '0.85rem', color: 'var(--color-accent)' }}
                             >
                                 View on Hugging Face →
                             </a>
-                            <p style={{ margin: '8px 0 0', fontSize: '0.85rem' }}>License: Apache 2.0 / Liquid Community License</p>
+                            <p style={{ margin: '8px 0 0', fontSize: '0.85rem' }}>License: Apache 2.0</p>
                         </div>
 
                         <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
-                            <h5 style={{ margin: '0 0 8px' }}>LFM2.5-1.2B (Legacy)</h5>
+                            <h5 style={{ margin: '0 0 8px' }}>Qwen 2.5 1.5B Instruct</h5>
                             <p style={{ margin: '0 0 4px', fontSize: '0.9rem', color: 'var(--color-text-muted)' }}>
-                                Model by <strong>Liquid AI</strong>
+                                Multilingual model by <strong>Qwen / Alibaba Cloud</strong>
                             </p>
                             <a
-                                href="https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF"
+                                href="https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 style={{ fontSize: '0.85rem', color: 'var(--color-accent)' }}
@@ -80,10 +80,10 @@ export default function LicenseModal({ isOpen, onClose }) {
                                 <strong>React</strong> (v19.2.0) - MIT License
                             </div>
                             <div style={{ padding: '8px 12px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px' }}>
-                                <strong>@wllama/wllama</strong> (v2.3.7) - MIT License
+                                <strong>@wllama/wllama</strong> (v3.8.1) - MIT License
                                 <br />
                                 <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
-                                    WebAssembly-based LLM inference engine
+                                    WebAssembly + WebGPU llama.cpp inference engine
                                 </span>
                             </div>
                             <div style={{ padding: '8px 12px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px' }}>

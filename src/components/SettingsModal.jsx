@@ -546,7 +546,7 @@ export default function SettingsModal({
 
                                 <div className="setting-group" style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
                                     <select
-                                        value={localLMStudioConfig.enabled ? 'lmstudio' : (localModelConfig?.model_name || 'lfm3')}
+                                        value={localLMStudioConfig.enabled ? 'lmstudio' : (localModelConfig?.model_name || 'lfm2_thinking')}
                                         onChange={(e) => {
                                             if (e.target.value === 'lmstudio') return;
                                             handleModelSelectionChange(e);
@@ -555,10 +555,11 @@ export default function SettingsModal({
                                     >
                                         {localLMStudioConfig.enabled && <option value="lmstudio">🤖 LM Studio (Active)</option>}
                                         <optgroup label="Built-in Models">
-                                            <option value="lfm3">⭐ {t('modelDownload.lfm3Model')} (Recommended)</option>
-                                            <option value="lfm3_fast">⚡ {t('modelDownload.lfm3FastModel')}</option>
-                                            <option value="thinking">{t('modelDownload.thinkingModel')} (Legacy)</option>
-                                            <option value="instruct">{t('modelDownload.instructModel')} (Legacy)</option>
+                                            <option value="lfm2_thinking">⭐ {t('modelDownload.lfm2ThinkingModel')} (Recommended)</option>
+                                            <option value="lfm2_instruct">💬 {t('modelDownload.lfm2InstructModel')}</option>
+                                            <option value="qwen25_15b">🌐 {t('modelDownload.qwen25Model')}</option>
+                                            <option value="thinking">Liquid LFM 1.2B Thinking (Legacy)</option>
+                                            <option value="instruct">Liquid LFM 1.2B Instruct (Legacy)</option>
                                         </optgroup>
                                         <optgroup label="Custom Models" key="custom-models">
                                             {downloadedModels.filter(m => !MODEL_URLS[m.name]).map(m => (
@@ -611,10 +612,11 @@ export default function SettingsModal({
                                                 }}>
                                                     <div>
                                                         <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
-                                                            {key === 'lfm3' ? t('modelDownload.lfm3Model') :
-                                                             key === 'lfm3_fast' ? t('modelDownload.lfm3FastModel') :
-                                                             key === 'thinking' ? t('modelDownload.thinkingModel') + ' (Legacy)' :
-                                                             t('modelDownload.instructModel') + ' (Legacy)'}
+                                                            {key === 'lfm2_thinking' ? t('modelDownload.lfm2ThinkingModel') :
+                                                             key === 'lfm2_instruct' ? t('modelDownload.lfm2InstructModel') :
+                                                             key === 'qwen25_15b' ? t('modelDownload.qwen25Model') :
+                                                             key === 'thinking' ? t('modelDownload.lfm2ThinkingModel') + ' (Legacy)' :
+                                                             t('modelDownload.lfm2InstructModel') + ' (Legacy)'}
                                                         </div>
                                                         <div style={{ fontSize: '0.8em', color: 'var(--color-text-muted)' }}>
                                                             {isDownloaded ?

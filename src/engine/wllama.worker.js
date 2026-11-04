@@ -183,6 +183,30 @@ async function initialize(modelConfig = {}) {
             }
         });
 
+        // Validate model metadata & architecture support
+        const meta = wllama.getModelMetadata();
+        const arch = meta?.meta?.['general.architecture'] || meta?.hparams?.['general.architecture'];
+        console.log('[Worker] Model loaded into Wllama. Detected architecture:', arch);
+
+        const SUPPORTED_ARCHS = [
+            'llama', 'falcon', 'gpt2', 'gptj', 'gptneox', 'mpt', 'baichuan',
+            'starcoder', 'refact', 'bert', 'nomic-bert', 'jina-bert-v2', 'bloom',
+            'stablelm', 'qwen', 'qwen2', 'qwen2moe', 'phi2', 'phi3', 'plamo',
+            'gemma', 'gemma2', 'starcoder2', 'command-r', 'dbrx', 'olmo',
+            'openelm', 'arctic', 'deepseek2', 'chatglm', 'bitnet', 't5',
+            't5encoder', 'jamba', 'nemotron', 'chameleon', 'lfm', 'lfm2'
+        ];
+
+        if (arch && !SUPPORTED_ARCHS.includes(arch)) {
+            throw new Error(`Model architecture '${arch}' is not supported by current Wllama WebAssembly build. Please use a model with a supported architecture (e.g. LFM2.5, Qwen2.5, LLaMA).`);
+        }
+
+        try {
+            wllama.getLoadedContextInfo();
+        } catch (ctxErr) {
+            throw new Error(`Failed to initialize WebAssembly context: ${ctxErr.message}`);
+        }
+
         console.log('[Worker] Model loaded successfully');
         postMessage({ type: 'debug', message: 'Model loaded successfully' });
         postMessage({
@@ -254,29 +278,66 @@ async function runCompletion(messages, config, jobId) {
         let nTokens = 0;
         let fullResponse = '';
 
-        // Use modern OAI-compatible createChatCompletion streaming
-        const stream = await wllama.createChatCompletion({
-            messages: formattedMessages,
-            stream: true,
-            max_tokens: maxTokens,
-            temperature,
-            top_p: topP,
-            top_k: topK,
-            abortSignal: abortController.signal,
-        });
+        const hasChatTemplate = !!wllama.getChatTemplate();
 
-        for await (const chunk of stream) {
-            if (abortController.signal.aborted) break;
+        if (hasChatTemplate) {
+            // Use modern OAI-compatible createChatCompletion streaming when chat template is available
+            const stream = await wllama.createChatCompletion({
+                messages: formattedMessages,
+                stream: true,
+                max_tokens: maxTokens,
+                temperature,
+                top_p: topP,
+                top_k: topK,
+                abortSignal: abortController.signal,
+            });
 
-            const delta = chunk.choices[0]?.delta?.content;
-            if (delta) {
-                if (nTokens === 0) {
-                    firstTokenTime = performance.now();
+            for await (const chunk of stream) {
+                if (abortController.signal.aborted) break;
+
+                const delta = chunk.choices[0]?.delta?.content;
+                if (delta) {
+                    if (nTokens === 0) {
+                        firstTokenTime = performance.now();
+                    }
+                    nTokens++;
+                    fullResponse += delta;
+                    postMessage({ type: 'token', data: { token: delta, jobId } });
                 }
-                nTokens++;
-                fullResponse += delta;
-                postMessage({ type: 'token', data: { token: delta, jobId } });
             }
+        } else {
+            // Model does not have an embedded jinja chat template (e.g. Liquid LFM2.5).
+            // Format prompt manually and use createCompletion to avoid WASM chat_templates assert.
+            let promptStr = '';
+            if (config?.systemPrompt && jobId !== 'title_gen') {
+                promptStr += `<|start_header_id|>system<|end_header_id|>\n\n${config.systemPrompt}<|eot_id|>`;
+            }
+            for (const msg of formattedMessages) {
+                if (msg.role !== 'system') {
+                    promptStr += `<|start_header_id|>${msg.role}<|end_header_id|>\n\n${msg.content}<|eot_id|>`;
+                }
+            }
+            promptStr += `<|start_header_id|>assistant<|end_header_id|>\n\n`;
+
+            await wllama.createCompletion({
+                prompt: promptStr,
+                n_predict: maxTokens,
+                sampling: {
+                    temp: temperature,
+                    top_p: topP,
+                    top_k: topK,
+                },
+                use_cache: true,
+                onNewToken: (token, piece) => {
+                    if (abortController.signal.aborted) return;
+                    if (nTokens === 0) {
+                        firstTokenTime = performance.now();
+                    }
+                    nTokens++;
+                    fullResponse += piece;
+                    postMessage({ type: 'token', data: { token: piece, jobId } });
+                }
+            });
         }
 
         const endTime = performance.now();
