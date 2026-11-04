@@ -469,7 +469,32 @@ export default function ChatInterface({
                         </div>
                     </div>
 
-                    <div className="header-right">
+                    <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button
+                            onClick={onOpenGlobalSettings}
+                            className="hw-header-indicator"
+                            title={engine.hasWebGPU ? 'WebGPU Hardware Accelerated (Click to open settings)' : 'CPU WASM Mode (Click to open settings)'}
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '4px 10px',
+                                borderRadius: '20px',
+                                fontSize: '0.75rem',
+                                fontWeight: '600',
+                                background: engine.hasWebGPU ? 'rgba(34, 197, 94, 0.12)' : 'rgba(234, 179, 8, 0.12)',
+                                border: engine.hasWebGPU ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(234, 179, 8, 0.4)',
+                                color: engine.hasWebGPU ? '#4ade80' : '#facc15',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            <span>{engine.hasWebGPU ? '⚡ GPU' : '⚙️ CPU'}</span>
+                            <span style={{ opacity: 0.7 }}>•</span>
+                            <span style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {engine.lmStudioConfig?.enabled ? 'LM Studio' : (engine.modelConfig?.model_name || 'Model')}
+                            </span>
+                        </button>
                         <button onClick={onOpenGlobalSettings} className="icon-btn" title={t('chat.globalSettings')}>
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <circle cx="12" cy="12" r="3"></circle>

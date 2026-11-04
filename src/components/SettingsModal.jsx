@@ -17,13 +17,15 @@ export default function SettingsModal({
     downloadedModels = [],
     onListModels,
     onDeleteModel,
-    onAddCustomModel, // New prop
-    onRemoveCustomModel, // New prop
-    lmStudioConfig = { enabled: false, baseUrl: 'http://localhost:1234/v1', modelId: '' }, // New prop
-    onSaveLMStudioConfig // New prop
+    onAddCustomModel,
+    onRemoveCustomModel,
+    lmStudioConfig = { enabled: false, baseUrl: 'http://localhost:1234/v1', modelId: '' },
+    onSaveLMStudioConfig
 }) {
     if (!isOpen) return null;
 
+    const isGlobal = !!modelConfig;
+    const [activeTab, setActiveTab] = React.useState(isGlobal ? 'hardware' : 'generation');
 
     const [localConfig, setLocalConfig] = React.useState({
         systemPrompt: '',
@@ -31,8 +33,16 @@ export default function SettingsModal({
         topP: 0.9,
         topK: 40,
         maxTokens: 2000,
+        voicePitch: 1.0,
+        voiceRate: 1.0,
+        voiceVolume: 1.0,
+        voiceName: '',
+        recognitionLanguage: 'ja-JP',
+        realTimeSpeech: true,
+        useLocalSpeech: false,
         ...config
     });
+
     const [localModelConfig, setLocalModelConfig] = React.useState(modelConfig);
     const [localLMStudioConfig, setLocalLMStudioConfig] = React.useState(lmStudioConfig);
     const [customModelUrl, setCustomModelUrl] = React.useState('');
@@ -41,24 +51,94 @@ export default function SettingsModal({
     const [availableVoices, setAvailableVoices] = React.useState([]);
     const [lmStudioModels, setLmStudioModels] = React.useState([]);
     const [isLoadingLMModels, setIsLoadingLMModels] = React.useState(false);
+    const [appliedNotice, setAppliedNotice] = React.useState(false);
+    const [saveAsDefault, setSaveAsDefault] = React.useState(false);
 
+    // Hardware WebGPU detector
+    const [gpuInfo, setGpuInfo] = React.useState({
+        vendor: '',
+        architecture: '',
+        description: '',
+        loaded: false
+    });
+
+    React.useEffect(() => {
+        let isMounted = true;
+        if (typeof navigator !== 'undefined' && navigator.gpu) {
+            navigator.gpu.requestAdapter().then(async (adapter) => {
+                if (!isMounted || !adapter) return;
+                let info = adapter.info;
+                if (!info && adapter.requestAdapterInfo) {
+                    try {
+                        info = await adapter.requestAdapterInfo();
+                    } catch (e) { }
+                }
+                if (info) {
+                    setGpuInfo({
+                        vendor: info.vendor || '',
+                        architecture: info.architecture || '',
+                        description: info.description || info.device || '',
+                        loaded: true
+                    });
+                }
+            }).catch(() => {});
+        }
+        return () => { isMounted = false; };
+    }, []);
+
+    // Speech synthesis voices
     React.useEffect(() => {
         if (typeof window !== 'undefined' && window.speechSynthesis) {
             const updateVoices = () => {
                 const voices = window.speechSynthesis.getVoices();
                 setAvailableVoices(voices);
             };
-
             updateVoices();
             window.speechSynthesis.onvoiceschanged = updateVoices;
-
             return () => {
                 window.speechSynthesis.onvoiceschanged = null;
             };
         }
     }, []);
 
-    // Fetch LM Studio models when enabled
+    // Reset local config when modal opens
+    const prevIsOpenRef = React.useRef(false);
+    React.useEffect(() => {
+        if (isOpen && !prevIsOpenRef.current) {
+            setSaveAsDefault(false);
+            setLocalConfig({
+                systemPrompt: '',
+                temperature: 0.7,
+                topP: 0.9,
+                topK: 40,
+                maxTokens: 2000,
+                voicePitch: 1.0,
+                voiceRate: 1.0,
+                voiceVolume: 1.0,
+                voiceName: '',
+                recognitionLanguage: 'ja-JP',
+                realTimeSpeech: true,
+                useLocalSpeech: false,
+                ...config
+            });
+            if (modelConfig) {
+                setLocalModelConfig({
+                    ...modelConfig,
+                    model_name: modelConfig.model_name || 'lfm2_thinking'
+                });
+            }
+            if (lmStudioConfig) {
+                setLocalLMStudioConfig(lmStudioConfig);
+            }
+            if (onListModels) {
+                onListModels();
+            }
+            setActiveTab(isGlobal ? 'hardware' : 'generation');
+        }
+        prevIsOpenRef.current = isOpen;
+    }, [isOpen]);
+
+    // LM Studio models fetching
     React.useEffect(() => {
         if (localLMStudioConfig.enabled && localLMStudioConfig.baseUrl) {
             fetchLMStudioModels();
@@ -86,13 +166,9 @@ export default function SettingsModal({
 
     const applyLMStudioModel = async (modelId) => {
         if (!modelId || !localLMStudioConfig.baseUrl) return;
-
         try {
             const baseUrl = localLMStudioConfig.baseUrl.replace(/\/$/, '');
-
-            // Load new model via Chat Completion (Standard OpenAI way to force load)
             const url = `${baseUrl}/chat/completions`;
-            // We just send a dummy request with max_tokens 1 to trigger loading
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -104,22 +180,17 @@ export default function SettingsModal({
             });
 
             if (res.ok) {
-                // Also save config immediately
-                // Update the local state first to ensure internal consistency if needed (though we passed modelId)
                 const updatedConfig = { ...localLMStudioConfig, modelId };
                 if (onSaveLMStudioConfig) onSaveLMStudioConfig(updatedConfig);
-                // Optional: alert check? maybe skip alert for auto-apply to be less annoying?
-                // Or just a console log?
-                console.log("Model switch triggered successfully!");
+                alert(getLanguage() === 'ja' ? 'LM Studioのモデルを適用しました！' : 'LM Studio model applied!');
             } else {
-                console.warn("Failed to trigger load. Check if server logs show a model reload.");
+                alert(getLanguage() === 'ja' ? 'モデル切り替えに失敗しました。サーバーのログをご確認ください。' : 'Failed to switch model. Check server logs.');
             }
         } catch (err) {
             console.error(err);
             alert("Error: " + err.message);
         }
     };
-
 
     const handleChange = (e) => {
         const { name, value, type } = e.target;
@@ -138,25 +209,15 @@ export default function SettingsModal({
         }));
     };
 
-    const handleModelSelectionChange = (e) => {
+    const handleModelSelectionChange = (name) => {
         if (isGenerating) return;
-        const name = e.target.value;
-
-        // Check if it's a built-in model
         let url = MODEL_URLS[name];
-
-        // If not, check if it's a custom model
         if (!url) {
             const customModel = downloadedModels.find(m => m.name === name);
             if (customModel) {
-                // For custom models, we use the cacheName or url
-                // If it's a file, url might be a blob or cache key, we need to pass what `useEngine` expects.
-                // `useEngine` expects `model_url` to be the downloadable URL OR string to identify it.
-                // Re-using originalURL or name if valid.
                 url = customModel.url || customModel.originalURL || name;
             }
         }
-
         setLocalModelConfig(prev => ({
             ...prev,
             model_name: name,
@@ -164,7 +225,19 @@ export default function SettingsModal({
         }));
     };
 
-    const [saveAsDefault, setSaveAsDefault] = React.useState(false);
+    const handleApplyGpuRecommended = () => {
+        if (!localModelConfig) return;
+        setLocalModelConfig(prev => ({
+            ...prev,
+            n_gpu_layers: 99,
+            cache_type_k: 'f16',
+            cache_type_v: 'f16',
+            n_batch: 256,
+            flash_attn: false
+        }));
+        setAppliedNotice(true);
+        setTimeout(() => setAppliedNotice(false), 4000);
+    };
 
     const handleSave = () => {
         if (isGenerating) return;
@@ -182,13 +255,8 @@ export default function SettingsModal({
         e.preventDefault();
         if (!customModelName || !customModelUrl) return;
 
-        // Force save current config state (e.g. LM Studio disabled) before adding model/reloading
-        if (onSaveLMStudioConfig) {
-            await onSaveLMStudioConfig(localLMStudioConfig);
-        }
-        if (onSave) {
-            onSave(localConfig, saveAsDefault);
-        }
+        if (onSaveLMStudioConfig) await onSaveLMStudioConfig(localLMStudioConfig);
+        if (onSave) onSave(localConfig, saveAsDefault);
 
         setIsAddingModel(true);
         try {
@@ -198,13 +266,11 @@ export default function SettingsModal({
                 type: 'url'
             });
 
-            // Auto-select
             if (onSaveModelConfig) {
                 await onSaveModelConfig({
                     model_name: customModelName,
                     model_url: customModelUrl
                 });
-                // Small delay to ensure storage persistence
                 await new Promise(r => setTimeout(r, 500));
             }
 
@@ -237,18 +303,12 @@ export default function SettingsModal({
                 size: file.size
             });
 
-            // Auto-select
             if (onSaveModelConfig) {
-                // For file, URL is the fake one we generated in App.jsx... 
-                // Wait, SettingsModal doesn't know the fake URL.
-                // But App.jsx's `onAddCustomModel` handles DB insertion.
-                // We can guess the URL: `https://custom-model/${fileName}`
                 await onSaveModelConfig({
                     model_name: fileName,
                     model_url: `https://custom-model/${fileName}`
                 });
             }
-
         } catch (err) {
             console.error(err);
             alert('Failed to add file: ' + err.message);
@@ -257,763 +317,964 @@ export default function SettingsModal({
         }
     };
 
-
-    // Track previous isOpen state to detect when modal opens
-    const prevIsOpenRef = React.useRef(false);
-
-    // Reset local config when modal opens
-    React.useEffect(() => {
-        // Only reset when modal transitions from closed to open
-        if (isOpen && !prevIsOpenRef.current) {
-            setSaveAsDefault(false); // Reset default checkbox
-            // Ensure all config properties have default values
-            const defaultConfig = {
-                systemPrompt: '',
-                temperature: 0.7,
-                topP: 0.9,
-                topK: 40,
-                maxTokens: 2000,
-                voicePitch: 1.0,
-                voiceRate: 1.0,
-                voiceVolume: 1.0,
-                voiceName: '',
-                recognitionLanguage: 'ja-JP',
-                realTimeSpeech: true,
-                useLocalSpeech: false,
-                ...config
-            };
-            setLocalConfig(defaultConfig);
-            if (modelConfig) {
-                // Ensure model_name exists for older configs
-                const safeModelConfig = {
-                    ...modelConfig,
-                    model_name: modelConfig.model_name || 'thinking'
-                };
-                setLocalModelConfig(safeModelConfig);
-            }
-            if (lmStudioConfig) {
-                setLocalLMStudioConfig(lmStudioConfig);
-            }
-            if (onListModels) {
-                onListModels();
-            }
+    const testSpeechVoice = () => {
+        if (typeof window === 'undefined' || !window.speechSynthesis) return;
+        window.speechSynthesis.cancel();
+        const testText = getLanguage() === 'ja'
+            ? 'こんにちは！これはローカルAIの音声テストです。'
+            : 'Hello! This is a test of the local AI speech output.';
+        const utterance = new SpeechSynthesisUtterance(testText);
+        if (localConfig.voiceName) {
+            const voice = availableVoices.find(v => v.name === localConfig.voiceName);
+            if (voice) utterance.voice = voice;
         }
-        prevIsOpenRef.current = isOpen;
-    }, [isOpen]); // Only depend on isOpen
+        utterance.pitch = localConfig.voicePitch || 1.0;
+        utterance.rate = localConfig.voiceRate || 1.0;
+        utterance.volume = localConfig.voiceVolume || 1.0;
+        window.speechSynthesis.speak(utterance);
+    };
+
+    const promptPresets = [
+        { label: getLanguage() === 'ja' ? '標準アシスタント' : 'Default Assistant', prompt: getLanguage() === 'ja' ? 'あなたは親切で知的なAIアシスタントです。ユーザーの質問に日本語で的確かつ簡潔に答えてください。' : 'You are a helpful and intelligent AI assistant.' },
+        { label: getLanguage() === 'ja' ? 'プログラミング特化' : 'Coding Expert', prompt: getLanguage() === 'ja' ? 'あなたは熟練のシニアエンジニアです。クリーンで実用的なコード、解説、最適な設計案を提示してください。' : 'You are an expert senior software engineer. Provide clean, secure, and idiomatic code with clear explanations.' },
+        { label: getLanguage() === 'ja' ? '論理的・客観的' : 'Logical & Analytical', prompt: getLanguage() === 'ja' ? 'あなたは論理的思考に長けた専門家です。事実と推論を区別し、前提を整理して論理的な結論を導いてください。' : 'You are an analytical thinker. Break problems into structured steps and draw objective, reasoned conclusions.' },
+        { label: getLanguage() === 'ja' ? '親しみやすい雑談' : 'Casual Friendly', prompt: getLanguage() === 'ja' ? 'あなたはフレンドリーで親切な会話パートナーです。親身で自然な口調で楽しく会話してください。' : 'You are a friendly and enthusiastic conversational partner.' }
+    ];
+
+    const currentModelName = localModelConfig?.model_name || 'lfm2_thinking';
 
     return (
         <div className="modal-overlay">
-            <div className="modal-content glass">
+            <div className="modal-content settings-modal-dialog glass">
+                {/* Header */}
                 <div className="modal-header">
-                    <h3>{title}</h3>
+                    <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>⚙️</span>
+                        <span>{title}</span>
+                    </h3>
                     <button onClick={onClose} className="close-btn">×</button>
                 </div>
 
-                <div className="modal-body">
-                    {isGenerating && (
-                        <div className="warning-banner">
-                            ⚠️ {getLanguage() === 'ja' ? '生成中は設定を変更できません。' : 'Settings cannot be changed while generation is in progress.'}
-                        </div>
-                    )}
-
-                    <div className={`setting-group ${isGenerating ? 'disabled-section' : ''}`} style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
-                        <label>{t('settings.language')}</label>
-                        <select
-                            value={getLanguage()}
-                            onChange={async (e) => {
-                                const newLang = e.target.value;
-                                setLanguage(newLang);
-                                await setUserLanguage(newLang);
-                                // Force re-render
-                                window.location.reload();
-                            }}
-                            disabled={isGenerating}
+                {/* Tab Bar */}
+                <div className="settings-tab-bar">
+                    {isGlobal && (
+                        <button
+                            type="button"
+                            className={`settings-tab-btn ${activeTab === 'hardware' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('hardware')}
                         >
-                            <option value="en">English</option>
-                            <option value="ja">日本語</option>
-                        </select>
-                        <small>{t('settings.languageDesc')}</small>
-                    </div>
-
-                    <div className={`setting-group ${isGenerating ? 'disabled-section' : ''}`} style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
-                        <label>{t('settings.systemPrompt')}</label>
-                        <textarea
-                            name="systemPrompt"
-                            value={localConfig.systemPrompt}
-                            onChange={handleChange}
-                            rows={3}
-                            placeholder={t('settings.systemPromptPlaceholder')}
-                            disabled={isGenerating}
-                        />
-                        <small>{t('settings.systemPromptDesc')}</small>
-                    </div>
-
-                    {/* Voice Settings Section */}
-                    {window.speechSynthesis && (
+                            <span>⚡</span>
+                            <span>{t('settings.tabHardware') || 'Hardware & Models'}</span>
+                        </button>
+                    )}
+                    <button
+                        type="button"
+                        className={`settings-tab-btn ${activeTab === 'generation' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('generation')}
+                    >
+                        <span>💬</span>
+                        <span>{t('settings.tabGeneration') || 'AI Parameters'}</span>
+                    </button>
+                    <button
+                        type="button"
+                        className={`settings-tab-btn ${activeTab === 'voice' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('voice')}
+                    >
+                        <span>🔊</span>
+                        <span>{t('settings.tabVoice') || 'Voice & UI'}</span>
+                    </button>
+                    {isGlobal && (
                         <>
-                            <div className="setting-group" style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto', marginTop: '20px', borderTop: '1px solid var(--color-glass-border)', paddingTop: '10px' }}>
-                                <label style={{ marginBottom: '10px', display: 'block', color: 'var(--color-accent)' }}>{t('settings.voiceSettings') || 'Voice Settings'}</label>
-
-                                <div className="setting-group" style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto', marginBottom: '15px' }}>
-                                    <label>{t('settings.recognitionLanguage') || 'Speech Recognition Language'}</label>
-                                    <select
-                                        name="recognitionLanguage"
-                                        value={localConfig.recognitionLanguage || 'ja-JP'}
-                                        onChange={handleChange}
-                                        disabled={isGenerating}
-                                    >
-                                        <option value="ja-JP">日本語 (Japanese)</option>
-                                        <option value="en-US">English (US)</option>
-                                    </select>
-                                </div>
-
-                                <label>{t('settings.voiceName') || 'Voice'}</label>
-                                <select
-                                    name="voiceName"
-                                    value={localConfig.voiceName || ''}
-                                    onChange={handleChange}
-                                    disabled={isGenerating}
-                                >
-                                    <option value="">Default</option>
-                                    {availableVoices.map((voice) => (
-                                        <option key={voice.name} value={voice.name}>
-                                            {voice.name} ({voice.lang})
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="setting-group" style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
-                                <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px' }}>
-                                    <input
-                                        type="checkbox"
-                                        name="realTimeSpeech"
-                                        checked={localConfig.realTimeSpeech || false}
-                                        onChange={(e) => setLocalConfig(prev => ({ ...prev, realTimeSpeech: e.target.checked }))}
-                                        style={{ width: 'auto', margin: 0, transform: 'scale(1.2)' }}
-                                    />
-                                    <span>{t('settings.realTimeSpeech')}</span>
-                                </label>
-                            </div>
-
-                            <div className="setting-group" style={{ opacity: 0.5, pointerEvents: 'none' }}>
-                                <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px' }}>
-                                    <input
-                                        type="checkbox"
-                                        name="useLocalSpeech"
-                                        checked={false}
-                                        readOnly
-                                        disabled
-                                        style={{ width: 'auto', margin: 0, transform: 'scale(1.2)' }}
-                                    />
-                                    <span>{t('ui.localSpeechDisabled')}</span>
-                                </label>
-                                <small style={{ display: 'block', marginTop: '4px', color: 'var(--color-text-muted)' }}>
-                                    {t('ui.featureUnavailable')}
-                                </small>
-                            </div>
-
-
-                            <div className="setting-row" style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
-                                <div className="setting-group">
-                                    <label>{t('settings.formattedPitch') ? t('settings.formattedPitch').replace('{value}', localConfig.voicePitch || 1.0) : `Pitch: ${localConfig.voicePitch || 1.0}`}</label>
-                                    <input
-                                        type="range"
-                                        name="voicePitch"
-                                        min="0.5"
-                                        max="2"
-                                        step="0.1"
-                                        value={localConfig.voicePitch || 1.0}
-                                        onChange={handleChange}
-                                        disabled={isGenerating}
-                                    />
-                                </div>
-                                <div className="setting-group">
-                                    <label>{t('settings.formattedRate') ? t('settings.formattedRate').replace('{value}', localConfig.voiceRate || 1.0) : `Rate: ${localConfig.voiceRate || 1.0}`}</label>
-                                    <input
-                                        type="range"
-                                        name="voiceRate"
-                                        min="0.5"
-                                        max="2"
-                                        step="0.1"
-                                        value={localConfig.voiceRate || 1.0}
-                                        onChange={handleChange}
-                                        disabled={isGenerating}
-                                    />
-                                </div>
-                            </div>
-                            <div className="setting-group" style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
-                                <label>{t('settings.formattedVolume') ? t('settings.formattedVolume').replace('{value}', localConfig.voiceVolume || 1.0) : `Volume: ${localConfig.voiceVolume || 1.0}`}</label>
-                                <input
-                                    type="range"
-                                    name="voiceVolume"
-                                    min="0"
-                                    max="1"
-                                    step="0.1"
-                                    value={localConfig.voiceVolume || 1.0}
-                                    onChange={handleChange}
-                                    disabled={isGenerating}
-                                />
-                            </div>
+                            <button
+                                type="button"
+                                className={`settings-tab-btn ${activeTab === 'external' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('external')}
+                            >
+                                <span>🔌</span>
+                                <span>{t('settings.tabExternal') || 'External (LM Studio)'}</span>
+                            </button>
+                            <button
+                                type="button"
+                                className={`settings-tab-btn ${activeTab === 'data' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('data')}
+                            >
+                                <span>🗑️</span>
+                                <span>{t('settings.tabData') || 'Storage & Reset'}</span>
+                            </button>
                         </>
                     )}
+                </div>
 
-                    <div className="setting-row" style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
-                        <div className="setting-group">
-                            <label>{t('settings.temperature')} ({localConfig.temperature})</label>
-                            <input
-                                type="range"
-                                name="temperature"
-                                min="0"
-                                max="2"
-                                step="0.1"
-                                value={localConfig.temperature}
-                                onChange={handleChange}
-                                disabled={isGenerating}
-                            />
-                            <small>{t('settings.temperatureDesc')}</small>
+                {/* Body */}
+                <div className="modal-body">
+                    {isGenerating && (
+                        <div className="warning-banner" style={{ marginBottom: '16px' }}>
+                            ⚠️ {getLanguage() === 'ja' ? 'AI生成中は設定を変更できません。生成完了までお待ちください。' : 'Settings cannot be changed while AI generation is in progress.'}
                         </div>
+                    )}
 
-                        <div className="setting-group">
-                            <label>{t('settings.topP')} ({localConfig.topP})</label>
-                            <input
-                                type="range"
-                                name="topP"
-                                min="0"
-                                max="1"
-                                step="0.05"
-                                value={localConfig.topP}
-                                onChange={handleChange}
-                                disabled={isGenerating}
-                            />
-                            <small>{t('settings.topPDesc')}</small>
+                    {appliedNotice && (
+                        <div style={{
+                            background: 'rgba(34, 197, 94, 0.15)',
+                            border: '1px solid #22c55e',
+                            color: '#86efac',
+                            padding: '10px 16px',
+                            borderRadius: '8px',
+                            marginBottom: '16px',
+                            fontSize: '0.85rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px'
+                        }}>
+                            ✅ {t('settings.recommendedApplied')}
                         </div>
-                    </div>
+                    )}
 
-                    <div className="setting-row" style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
-                        <div className="setting-group">
-                            <label>{t('settings.topK')}</label>
-                            <input
-                                type="number"
-                                name="topK"
-                                value={localConfig.topK}
-                                onChange={handleChange}
-                                disabled={isGenerating}
-                            />
-                            <small>{t('settings.topKDesc')}</small>
-                        </div>
-
-                        <div className="setting-group">
-                            <label>{t('settings.maxTokens')}</label>
-                            <input
-                                type="number"
-                                name="maxTokens"
-                                value={localConfig.maxTokens}
-                                onChange={handleChange}
-                                disabled={isGenerating}
-                            />
-                            <small>{t('settings.maxTokensDesc')}</small>
-                        </div>
-                    </div>
-
-                    {/* Performance Settings (Global Only) */}
-                    {localModelConfig && (
+                    {/* TAB 1: HARDWARE & MODELS */}
+                    {isGlobal && activeTab === 'hardware' && localModelConfig && (
                         <div style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
-                            <hr style={{ margin: '20px 0', borderColor: 'var(--color-glass-border)' }} />
-                            <h4 style={{ marginBottom: '12px', color: 'var(--color-accent)' }}>
-                                ⚡ Performance Settings
-                            </h4>
-                            <small style={{ display: 'block', marginBottom: '16px', color: 'var(--color-text-muted)' }}>
-                                Changes require page reload to take effect.
-                            </small>
+                            {/* Prominent Hardware Status Card */}
+                            <div className={`hw-status-card ${hasWebGPU ? 'gpu-active' : 'cpu-mode'}`}>
+                                <div className="hw-status-header">
+                                    <div>
+                                        <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+                                            {t('settings.hwStatusTitle')}
+                                        </div>
+                                        <div className={`hw-badge-status ${hasWebGPU ? 'gpu' : 'cpu'}`}>
+                                            <span className="hw-status-pulse"></span>
+                                            {hasWebGPU ? t('settings.gpuActiveTitle') : t('settings.cpuActiveTitle')}
+                                        </div>
+                                    </div>
+                                    {hasWebGPU && (
+                                        <button
+                                            type="button"
+                                            className="btn-apply-gpu-recom"
+                                            onClick={handleApplyGpuRecommended}
+                                            title={t('settings.applyGpuRecommendedDesc')}
+                                        >
+                                            {t('settings.applyGpuRecommended')}
+                                        </button>
+                                    )}
+                                </div>
 
-                            <div className="setting-group" style={{ marginBottom: '16px' }}>
-                                <div className="performance-settings">
-                                    <h3 className="section-title">⚡ {t('settings.modelSelection')}</h3>
-                                    <p className="section-desc">{t('settings.modelSelectionDesc')}</p>
-                                    <div style={{ marginTop: '8px', marginBottom: '14px' }}>
-                                        {hasWebGPU ? (
-                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(34, 197, 94, 0.15)', border: '1px solid #22c55e', color: '#22c55e', padding: '4px 10px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600 }}>
-                                                ⚡ WebGPU Acceleration: Active (Hardware Offloaded)
-                                            </span>
-                                        ) : (
-                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(234, 179, 8, 0.15)', border: '1px solid #eab308', color: '#eab308', padding: '4px 10px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600 }}>
-                                                ⚙️ CPU WASM Mode (Multi-threaded)
-                                            </span>
-                                        )}
+                                <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', margin: '8px 0 0 0', lineHeight: 1.4 }}>
+                                    {hasWebGPU ? t('settings.gpuActiveDesc') : t('settings.cpuActiveDesc')}
+                                </p>
+
+                                <div className="hw-metrics-grid">
+                                    <div className="hw-metric-item">
+                                        <div className="hw-metric-label">{t('settings.gpuDevice')}</div>
+                                        <div className="hw-metric-value" title={gpuInfo.description || (gpuInfo.vendor ? `${gpuInfo.vendor} (${gpuInfo.architecture})` : 'WebGPU Adapter')}>
+                                            {hasWebGPU
+                                                ? (gpuInfo.vendor ? `${gpuInfo.vendor.toUpperCase()} ${gpuInfo.architecture ? `(${gpuInfo.architecture})` : ''}` : 'Hardware GPU')
+                                                : 'None (CPU fallback)'}
+                                        </div>
+                                    </div>
+                                    <div className="hw-metric-item">
+                                        <div className="hw-metric-label">{t('settings.gpuLayers')}</div>
+                                        <div className="hw-metric-value highlight">
+                                            {localModelConfig.n_gpu_layers > 0
+                                                ? `${localModelConfig.n_gpu_layers} layers (${t('settings.allLayers')})`
+                                                : '0 (CPU only)'}
+                                        </div>
+                                    </div>
+                                    <div className="hw-metric-item">
+                                        <div className="hw-metric-label">{t('settings.kvCacheMode')}</div>
+                                        <div className="hw-metric-value highlight">
+                                            {localModelConfig.cache_type_k || 'f16'} (GPU Direct)
+                                        </div>
+                                    </div>
+                                    <div className="hw-metric-item">
+                                        <div className="hw-metric-label">{t('settings.batchSize')}</div>
+                                        <div className="hw-metric-value">
+                                            {localModelConfig.n_batch || 256}
+                                        </div>
                                     </div>
                                 </div>
+                            </div>
 
-                                <div className="setting-group" style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
-                                    <select
-                                        value={localLMStudioConfig.enabled ? 'lmstudio' : (localModelConfig?.model_name || 'lfm2_thinking')}
-                                        onChange={(e) => {
-                                            if (e.target.value === 'lmstudio') return;
-                                            handleModelSelectionChange(e);
-                                        }}
-                                        disabled={isGenerating || localLMStudioConfig.enabled}
+                            {/* Active Model Selection */}
+                            <div className="setting-group" style={{ marginBottom: '24px' }}>
+                                <label style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                                    <span>📦</span>
+                                    <span>{t('settings.modelSelection')}</span>
+                                </label>
+                                <small style={{ display: 'block', marginBottom: '14px', color: 'var(--color-text-muted)' }}>
+                                    {t('settings.modelSelectionDesc')}
+                                </small>
+
+                                <div className="model-cards-container">
+                                    {/* Built-in Model 1: LFM2.5 Thinking */}
+                                    <div
+                                        className={`model-select-card ${currentModelName === 'lfm2_thinking' ? 'selected' : ''}`}
+                                        onClick={() => handleModelSelectionChange('lfm2_thinking')}
                                     >
-                                        {localLMStudioConfig.enabled && <option value="lmstudio">🤖 LM Studio (Active)</option>}
-                                        <optgroup label="Built-in Models">
-                                            <option value="lfm2_thinking">⭐ {t('modelDownload.lfm2ThinkingModel')} (Recommended)</option>
-                                            <option value="lfm2_instruct">💬 {t('modelDownload.lfm2InstructModel')}</option>
-                                            <option value="qwen25_15b">🌐 {t('modelDownload.qwen25Model')}</option>
-                                            <option value="thinking">Liquid LFM 1.2B Thinking (Legacy)</option>
-                                            <option value="instruct">Liquid LFM 1.2B Instruct (Legacy)</option>
-                                        </optgroup>
-                                        <optgroup label="Custom Models" key="custom-models">
-                                            {downloadedModels.filter(m => !MODEL_URLS[m.name]).map(m => (
-                                                <option key={m.name} value={m.name}>{m.name}</option>
-                                            ))}
-                                        </optgroup>
-                                    </select>
-                                    {localLMStudioConfig.enabled && (
-                                        <div style={{ fontSize: '0.9em', color: 'var(--color-accent)', marginTop: '8px', fontWeight: 'bold' }}>
-                                            ✅ LM Studio is Active.
+                                        <div className="model-select-card-info">
+                                            <div className="model-select-card-title">
+                                                <span>⭐ {t('modelDownload.lfm2ThinkingModel')}</span>
+                                                {currentModelName === 'lfm2_thinking' && <span className="badge-active-model">{t('settings.activeModelBadge')}</span>}
+                                            </div>
+                                            <div className="model-select-card-desc">
+                                                {t('modelDownload.lfm2ThinkingDesc')} • ~0.7 GB
+                                            </div>
                                         </div>
-                                    )}
-                                    <small>{t('settings.modelSelectionDesc')}</small>
-                                </div>
+                                        <input
+                                            type="radio"
+                                            name="active_model"
+                                            checked={currentModelName === 'lfm2_thinking'}
+                                            onChange={() => handleModelSelectionChange('lfm2_thinking')}
+                                            style={{ width: 'auto', margin: 0 }}
+                                        />
+                                    </div>
 
-                                <div className="setting-group" style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
-                                    <label>{t('settings.threads')} ({localModelConfig.n_threads || 4})</label>
-                                    <input
-                                        type="range"
-                                        name="n_threads"
-                                        min="1"
-                                        max={navigator.hardwareConcurrency || 16}
-                                        step="1"
-                                        value={localModelConfig.n_threads || 4}
-                                        onChange={handleModelConfigChange}
-                                        disabled={isGenerating}
-                                    />
-                                    <small>{t('settings.threadsDesc')}</small>
-                                </div>
+                                    {/* Built-in Model 2: LFM2.5 Instruct */}
+                                    <div
+                                        className={`model-select-card ${currentModelName === 'lfm2_instruct' ? 'selected' : ''}`}
+                                        onClick={() => handleModelSelectionChange('lfm2_instruct')}
+                                    >
+                                        <div className="model-select-card-info">
+                                            <div className="model-select-card-title">
+                                                <span>💬 {t('modelDownload.lfm2InstructModel')}</span>
+                                                {currentModelName === 'lfm2_instruct' && <span className="badge-active-model">{t('settings.activeModelBadge')}</span>}
+                                            </div>
+                                            <div className="model-select-card-desc">
+                                                {t('modelDownload.lfm2InstructDesc')} • ~0.7 GB
+                                            </div>
+                                        </div>
+                                        <input
+                                            type="radio"
+                                            name="active_model"
+                                            checked={currentModelName === 'lfm2_instruct'}
+                                            onChange={() => handleModelSelectionChange('lfm2_instruct')}
+                                            style={{ width: 'auto', margin: 0 }}
+                                        />
+                                    </div>
 
-                                {/* Model Management Section */}
-                                <div style={{ marginTop: '2rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
-                                    <h4 style={{ marginBottom: '12px', color: 'var(--color-accent)', fontSize: '0.9rem' }}>
-                                        📦 {t('settings.modelManagement') || 'Model Management'}
-                                    </h4>
-                                    <div className="model-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                        {Object.entries(MODEL_URLS).map(([key, url]) => {
-                                            const filename = url.split('/').pop().split('?')[0];
-                                            const downloadedFile = downloadedModels.find(m => m.name === filename);
-                                            const isDownloaded = !!downloadedFile;
+                                    {/* Built-in Model 3: Qwen 2.5 1.5B */}
+                                    <div
+                                        className={`model-select-card ${currentModelName === 'qwen25_15b' ? 'selected' : ''}`}
+                                        onClick={() => handleModelSelectionChange('qwen25_15b')}
+                                    >
+                                        <div className="model-select-card-info">
+                                            <div className="model-select-card-title">
+                                                <span>🌐 {t('modelDownload.qwen25Model')}</span>
+                                                {currentModelName === 'qwen25_15b' && <span className="badge-active-model">{t('settings.activeModelBadge')}</span>}
+                                            </div>
+                                            <div className="model-select-card-desc">
+                                                {t('modelDownload.qwen25Desc')} • ~1.1 GB
+                                            </div>
+                                        </div>
+                                        <input
+                                            type="radio"
+                                            name="active_model"
+                                            checked={currentModelName === 'qwen25_15b'}
+                                            onChange={() => handleModelSelectionChange('qwen25_15b')}
+                                            style={{ width: 'auto', margin: 0 }}
+                                        />
+                                    </div>
 
-                                            return (
-                                                <div key={key} style={{
-                                                    background: 'rgba(0,0,0,0.2)',
-                                                    padding: '10px',
-                                                    borderRadius: '8px',
-                                                    display: 'flex',
-                                                    justifyContent: 'space-between',
-                                                    alignItems: 'center'
-                                                }}>
-                                                    <div>
-                                                        <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
-                                                            {key === 'lfm2_thinking' ? t('modelDownload.lfm2ThinkingModel') :
-                                                             key === 'lfm2_instruct' ? t('modelDownload.lfm2InstructModel') :
-                                                             key === 'qwen25_15b' ? t('modelDownload.qwen25Model') :
-                                                             key === 'thinking' ? t('modelDownload.lfm2ThinkingModel') + ' (Legacy)' :
-                                                             t('modelDownload.lfm2InstructModel') + ' (Legacy)'}
-                                                        </div>
-                                                        <div style={{ fontSize: '0.8em', color: 'var(--color-text-muted)' }}>
-                                                            {isDownloaded ?
-                                                                `${(downloadedFile.size / 1024 / 1024).toFixed(1)} MB` :
-                                                                'Not downloaded'}
-                                                        </div>
-                                                    </div>
-                                                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                                        {isDownloaded ? (
-                                                            <>
-                                                                <button
-                                                                    onClick={() => {
-                                                                        if (confirm(t('common.delete') + ` ${key}?`)) onDeleteModel(downloadedFile.cacheName || downloadedFile.name);
-                                                                    }}
-                                                                    className="icon-btn"
-                                                                    title={t('common.delete')}
-                                                                    style={{ color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', padding: '8px' }}
-                                                                >
-                                                                    🗑️
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => onRedownload(key)}
-                                                                    className="icon-btn"
-                                                                    title={t('settings.redownloadModel')}
-                                                                    style={{ color: 'var(--color-accent)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '8px' }}
-                                                                >
-                                                                    🔄
-                                                                </button>
-                                                            </>
-                                                        ) : (
-                                                            <button
-                                                                onClick={() => onRedownload(key)}
-                                                                className="secondary-btn"
-                                                                style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-                                                            >
-                                                                ⬇️ Download
-                                                            </button>
-                                                        )}
-                                                    </div>
+                                    {/* Custom Models */}
+                                    {downloadedModels.filter(m => !MODEL_URLS[m.name]).map(m => (
+                                        <div
+                                            key={m.name}
+                                            className={`model-select-card ${currentModelName === m.name ? 'selected' : ''}`}
+                                            onClick={() => handleModelSelectionChange(m.name)}
+                                        >
+                                            <div className="model-select-card-info">
+                                                <div className="model-select-card-title">
+                                                    <span>📁 {m.name}</span>
+                                                    {currentModelName === m.name && <span className="badge-active-model">{t('settings.activeModelBadge')}</span>}
                                                 </div>
-                                            );
-                                        })}
+                                                <div className="model-select-card-desc">
+                                                    Custom Model • {(m.size / 1024 / 1024).toFixed(1)} MB
+                                                </div>
+                                            </div>
+                                            <input
+                                                type="radio"
+                                                name="active_model"
+                                                checked={currentModelName === m.name}
+                                                onChange={() => handleModelSelectionChange(m.name)}
+                                                style={{ width: 'auto', margin: 0 }}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
 
-                                        {/* Custom Models List */}
-                                        {downloadedModels.filter(m => {
-                                            const builtInFilenames = Object.values(MODEL_URLS).map(u => u.split('/').pop().split('?')[0]);
-                                            return !builtInFilenames.includes(m.name);
-                                        }).map((model) => (
-                                            <div key={model.name} style={{
-                                                background: 'rgba(0,0,0,0.2)',
-                                                padding: '10px',
+                            {/* Downloaded Models Storage Manager */}
+                            <div style={{ background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '20px' }}>
+                                <h4 style={{ margin: '0 0 12px 0', fontSize: '0.95rem', color: 'var(--color-accent)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span>💾</span>
+                                    <span>{t('settings.modelManagement')}</span>
+                                </h4>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {Object.entries(MODEL_URLS).map(([key, url]) => {
+                                        const filename = url.split('/').pop().split('?')[0];
+                                        const downloadedFile = downloadedModels.find(m => m.name === filename);
+                                        const isDownloaded = !!downloadedFile;
+
+                                        return (
+                                            <div key={key} style={{
+                                                background: 'rgba(255,255,255,0.03)',
+                                                padding: '10px 14px',
                                                 borderRadius: '8px',
                                                 display: 'flex',
                                                 justifyContent: 'space-between',
-                                                alignItems: 'center',
-                                                marginTop: '8px'
+                                                alignItems: 'center'
                                             }}>
                                                 <div>
-                                                    <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{model.name}</div>
-                                                    <div style={{ fontSize: '0.8em', color: 'var(--color-text-muted)' }}>
-                                                        Custom Model • {(model.size / 1024 / 1024).toFixed(1)} MB
+                                                    <div style={{ fontWeight: '600', fontSize: '0.85rem' }}>
+                                                        {key === 'lfm2_thinking' ? t('modelDownload.lfm2ThinkingModel') :
+                                                         key === 'lfm2_instruct' ? t('modelDownload.lfm2InstructModel') :
+                                                         key === 'qwen25_15b' ? t('modelDownload.qwen25Model') :
+                                                         key === 'thinking' ? 'LFM 1.2B Thinking (Legacy)' :
+                                                         'LFM 1.2B Instruct (Legacy)'}
+                                                    </div>
+                                                    <div style={{ fontSize: '0.75rem', color: isDownloaded ? '#4ade80' : 'var(--color-text-muted)' }}>
+                                                        {isDownloaded ? `✓ ${getLanguage() === 'ja' ? 'ダウンロード済み' : 'Downloaded'} (${(downloadedFile.size / 1024 / 1024).toFixed(1)} MB)` : (getLanguage() === 'ja' ? '未ダウンロード' : 'Not downloaded')}
                                                     </div>
                                                 </div>
                                                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                                    <button
-                                                        onClick={async () => {
-                                                            if (confirm(`Delete custom model "${model.name}"?`)) {
-                                                                // 1. Remove from history
-                                                                // We need the ID, but here we only have name. 
-                                                                // onRemoveCustomModel usually expects ID.
-                                                                // But we can try to find it in the history list if we had it, or we can just try to delete by name in a loop?
-                                                                // Actually, let's just assume we delete the cache and let the user remove the entry if it persists?
-                                                                // No, we should clean up.
-                                                                // We don't have the customModels list with IDs here (we computed it from downloadedModels).
-                                                                // Ideally SettingsModal should receive `customModels` with IDs.
-                                                                // But `downloadedModels` items *might* have ID if they came from history merge?
-                                                                // Let's check useEngine... useEngine merges: { ...c, size: ... } from history.
-                                                                // So `model.id` should be available if it came from history!
-
-                                                                if (model.id && onRemoveCustomModel) {
-                                                                    await onRemoveCustomModel(model.id);
-                                                                }
-
-                                                                // 2. Remove from Cache API (if it was a file/url)
-                                                                try {
-                                                                    const cache = await caches.open('wllama');
-                                                                    // Try removing by typical URL patterns
-                                                                    await cache.delete(`https://custom-model/${model.name}`);
-                                                                    if (model.url) await cache.delete(model.url);
-                                                                } catch (e) { console.error("Cache clear error", e); }
-
-                                                                // 3. Remove from OPFS (if it was downloaded there)
-                                                                if (onDeleteModel) {
-                                                                    onDeleteModel(model.name);
-                                                                }
-
-                                                                // Reload to refresh lists
-                                                                window.location.reload();
-                                                            }
-                                                        }}
-                                                        className="icon-btn"
-                                                        title={t('common.delete')}
-                                                        style={{ color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', padding: '8px' }}
-                                                    >
-                                                        🗑️
-                                                    </button>
+                                                    {isDownloaded ? (
+                                                        <>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (confirm(t('common.delete') + ` ${key}?`)) onDeleteModel(downloadedFile.cacheName || downloadedFile.name);
+                                                                }}
+                                                                className="icon-btn"
+                                                                title={t('common.delete')}
+                                                                style={{ color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' }}
+                                                            >
+                                                                🗑️
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => onRedownload(key)}
+                                                                className="icon-btn"
+                                                                title={t('settings.redownloadModel')}
+                                                                style={{ color: 'var(--color-accent)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' }}
+                                                            >
+                                                                🔄
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => onRedownload(key)}
+                                                            className="secondary-btn"
+                                                            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+                                                        >
+                                                            ⬇️ Download
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
-                                        ))}
+                                        );
+                                    })}
+
+                                    {/* Custom Models in storage */}
+                                    {downloadedModels.filter(m => {
+                                        const builtInFilenames = Object.values(MODEL_URLS).map(u => u.split('/').pop().split('?')[0]);
+                                        return !builtInFilenames.includes(m.name);
+                                    }).map((model) => (
+                                        <div key={model.name} style={{
+                                            background: 'rgba(255,255,255,0.03)',
+                                            padding: '10px 14px',
+                                            borderRadius: '8px',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center'
+                                        }}>
+                                            <div>
+                                                <div style={{ fontWeight: '600', fontSize: '0.85rem' }}>{model.name}</div>
+                                                <div style={{ fontSize: '0.75rem', color: '#4ade80' }}>
+                                                    Custom Model • {(model.size / 1024 / 1024).toFixed(1)} MB
+                                                </div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    if (confirm(`Delete custom model "${model.name}"?`)) {
+                                                        if (model.id && onRemoveCustomModel) await onRemoveCustomModel(model.id);
+                                                        try {
+                                                            const cache = await caches.open('wllama');
+                                                            await cache.delete(`https://custom-model/${model.name}`);
+                                                            if (model.url) await cache.delete(model.url);
+                                                        } catch (e) { }
+                                                        if (onDeleteModel) onDeleteModel(model.name);
+                                                        window.location.reload();
+                                                    }
+                                                }}
+                                                className="icon-btn"
+                                                title={t('common.delete')}
+                                                style={{ color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px' }}
+                                            >
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Add Custom Model */}
+                            <div style={{ background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)', marginBottom: '20px' }}>
+                                <h4 style={{ margin: '0 0 12px 0', fontSize: '0.95rem', color: 'var(--color-accent)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span>➕</span>
+                                    <span>{t('settings.addModelTitle')}</span>
+                                </h4>
+                                <div className="setting-group" style={{ marginBottom: '12px' }}>
+                                    <label style={{ fontSize: '0.85rem' }}>{t('settings.addModelUrl')}</label>
+                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                        <input
+                                            placeholder="Model Name (e.g. MyModel)"
+                                            value={customModelName}
+                                            onChange={e => setCustomModelName(e.target.value)}
+                                            disabled={isAddingModel}
+                                            style={{ flex: '1 1 140px' }}
+                                        />
+                                        <input
+                                            placeholder="https://.../model.gguf"
+                                            value={customModelUrl}
+                                            onChange={e => setCustomModelUrl(e.target.value)}
+                                            disabled={isAddingModel}
+                                            style={{ flex: '2 1 240px' }}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleAddCustomModel}
+                                            disabled={isAddingModel || !customModelName || !customModelUrl}
+                                            className="btn-primary"
+                                            style={{ minWidth: '80px' }}
+                                        >
+                                            {isAddingModel ? 'Adding...' : 'Add'}
+                                        </button>
                                     </div>
-                                    <small>{t('settings.redownloadDesc')}</small>
                                 </div>
 
-                                {/* Custom Model Addition */}
-                                <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
-                                    <h4 style={{ marginBottom: '12px', color: 'var(--color-accent)', fontSize: '0.9rem' }}>
-                                        ➕ Add Custom Model
-                                    </h4>
+                                <div className="setting-group">
+                                    <label style={{ fontSize: '0.85rem' }}>{t('settings.addModelFile')}</label>
+                                    <input
+                                        type="file"
+                                        accept=".gguf"
+                                        onChange={handleFileUpload}
+                                        disabled={isAddingModel}
+                                    />
+                                </div>
+                            </div>
 
-                                    <div className="setting-group">
-                                        <label>Add from URL (.gguf)</label>
-                                        <div style={{ display: 'flex', gap: '8px' }}>
+                            {/* Advanced Hardware Tuning Accordion */}
+                            <details style={{ background: 'rgba(0,0,0,0.2)', padding: '14px 16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                                <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
+                                    ⚙️ {t('settings.advancedHardware')}
+                                </summary>
+                                <div style={{ marginTop: '16px' }}>
+                                    <div className="setting-row">
+                                        <div className="setting-group">
+                                            <label>{t('settings.gpuLayers')} ({localModelConfig.n_gpu_layers ?? 99})</label>
                                             <input
-                                                placeholder="Model Name"
-                                                value={customModelName}
-                                                onChange={e => setCustomModelName(e.target.value)}
-                                                disabled={isAddingModel}
+                                                type="range"
+                                                name="n_gpu_layers"
+                                                min="0"
+                                                max="99"
+                                                step="1"
+                                                value={localModelConfig.n_gpu_layers ?? 99}
+                                                onChange={handleModelConfigChange}
+                                                disabled={isGenerating}
                                             />
+                                            <small>{getLanguage() === 'ja' ? '99 = 全層GPU実行（推奨）。0 = CPUのみ。' : '99 = Full GPU offload (recommended). 0 = CPU only.'}</small>
+                                        </div>
+
+                                        <div className="setting-group">
+                                            <label>{t('settings.threads')} ({localModelConfig.n_threads || 4})</label>
                                             <input
-                                                placeholder="https://.../model.gguf"
-                                                value={customModelUrl}
-                                                onChange={e => setCustomModelUrl(e.target.value)}
-                                                disabled={isAddingModel}
+                                                type="range"
+                                                name="n_threads"
+                                                min="1"
+                                                max={typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 16) : 16}
+                                                step="1"
+                                                value={localModelConfig.n_threads || 4}
+                                                onChange={handleModelConfigChange}
+                                                disabled={isGenerating}
                                             />
-                                            <button
-                                                onClick={handleAddCustomModel}
-                                                disabled={isAddingModel || !customModelName || !customModelUrl}
-                                                className="btn-primary"
-                                                style={{ minWidth: '80px' }}
+                                            <small>{t('settings.threadsDesc')}</small>
+                                        </div>
+                                    </div>
+
+                                    <div className="setting-row">
+                                        <div className="setting-group">
+                                            <label>{t('settings.batchSize')}</label>
+                                            <select
+                                                name="n_batch"
+                                                value={localModelConfig.n_batch || 256}
+                                                onChange={handleModelConfigChange}
+                                                disabled={isGenerating}
                                             >
-                                                {isAddingModel ? 'Adding...' : 'Add'}
-                                            </button>
+                                                <option value={256}>256 (WebGPU Optimal)</option>
+                                                <option value={512}>512</option>
+                                                <option value={1024}>1024</option>
+                                            </select>
+                                            <small>{getLanguage() === 'ja' ? 'プロンプト評価時のバッチサイズ' : 'Prompt evaluation batch size'}</small>
+                                        </div>
+
+                                        <div className="setting-group">
+                                            <label>Flash Attention</label>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    name="flash_attn"
+                                                    checked={localModelConfig.flash_attn || false}
+                                                    onChange={handleModelConfigChange}
+                                                    disabled={isGenerating}
+                                                    style={{ width: 'auto', margin: 0 }}
+                                                />
+                                                <span>Enable Flash Attention</span>
+                                            </div>
+                                            <small>{getLanguage() === 'ja' ? '対応モデルで注意機構を最適化' : 'Attention optimization for supported models'}</small>
+                                        </div>
+                                    </div>
+
+                                    <div className="setting-row">
+                                        <div className="setting-group">
+                                            <label>KV Cache Type (K)</label>
+                                            <select
+                                                name="cache_type_k"
+                                                value={localModelConfig.cache_type_k || 'f16'}
+                                                onChange={handleModelConfigChange}
+                                                disabled={isGenerating}
+                                            >
+                                                <option value="f16">f16 (WebGPU Native / Peak Speed)</option>
+                                                <option value="q8_0">q8_0 (Quantized)</option>
+                                                <option value="q4_0">q4_0 (Aggressive)</option>
+                                                <option value="f32">f32 (Full 32-bit)</option>
+                                            </select>
+                                        </div>
+                                        <div className="setting-group">
+                                            <label>KV Cache Type (V)</label>
+                                            <select
+                                                name="cache_type_v"
+                                                value={localModelConfig.cache_type_v || 'f16'}
+                                                onChange={handleModelConfigChange}
+                                                disabled={isGenerating}
+                                            >
+                                                <option value="f16">f16 (WebGPU Native / Peak Speed)</option>
+                                                <option value="q8_0">q8_0 (Quantized)</option>
+                                                <option value="q4_0">q4_0 (Aggressive)</option>
+                                                <option value="f32">f32 (Full 32-bit)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
+                    )}
+
+                    {/* TAB 2: GENERATION PARAMETERS */}
+                    {activeTab === 'generation' && (
+                        <div style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
+                            {/* System Prompt */}
+                            <div className="setting-group" style={{ marginBottom: '20px' }}>
+                                <label style={{ fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span>🧠</span>
+                                    <span>{t('settings.systemPrompt')}</span>
+                                </label>
+                                <textarea
+                                    name="systemPrompt"
+                                    value={localConfig.systemPrompt}
+                                    onChange={handleChange}
+                                    rows={4}
+                                    placeholder={t('settings.systemPromptPlaceholder')}
+                                    disabled={isGenerating}
+                                    style={{ marginTop: '6px' }}
+                                />
+                                <small style={{ display: 'block', margin: '4px 0 8px 0' }}>{t('settings.systemPromptDesc')}</small>
+
+                                {/* System Prompt Presets */}
+                                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
+                                    {getLanguage() === 'ja' ? 'プリセットから適用:' : 'Apply Preset:'}
+                                </div>
+                                <div className="prompt-presets-bar">
+                                    {promptPresets.map((preset, idx) => (
+                                        <button
+                                            key={idx}
+                                            type="button"
+                                            className="prompt-preset-chip"
+                                            onClick={() => setLocalConfig(prev => ({ ...prev, systemPrompt: preset.prompt }))}
+                                        >
+                                            {preset.label}
+                                        </button>
+                                    ))}
+                                    {localConfig.systemPrompt && (
+                                        <button
+                                            type="button"
+                                            className="prompt-preset-chip"
+                                            style={{ color: '#ef4444' }}
+                                            onClick={() => setLocalConfig(prev => ({ ...prev, systemPrompt: '' }))}
+                                        >
+                                            {getLanguage() === 'ja' ? 'クリア' : 'Clear'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Temperature with intuitive guidance */}
+                            <div className="setting-group" style={{ marginBottom: '20px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <label style={{ fontSize: '0.95rem', fontWeight: 600 }}>
+                                        {t('settings.temperature')} ({localConfig.temperature})
+                                    </label>
+                                    <span style={{
+                                        fontSize: '0.8rem',
+                                        color: localConfig.temperature < 0.4 ? '#38bdf8' : (localConfig.temperature <= 0.8 ? '#4ade80' : '#f59e0b'),
+                                        fontWeight: 600
+                                    }}>
+                                        {localConfig.temperature < 0.4
+                                            ? (getLanguage() === 'ja' ? '厳格・論理的 (コード・事実確認)' : 'Strict & Precise (Code/Facts)')
+                                            : (localConfig.temperature <= 0.8
+                                                ? (getLanguage() === 'ja' ? 'バランス (推奨・日常会話)' : 'Balanced (Recommended)')
+                                                : (getLanguage() === 'ja' ? '創造的・自由 (アイデア出し)' : 'Creative & Expressive'))}
+                                    </span>
+                                </div>
+                                <input
+                                    type="range"
+                                    name="temperature"
+                                    min="0"
+                                    max="2"
+                                    step="0.05"
+                                    value={localConfig.temperature}
+                                    onChange={handleChange}
+                                    disabled={isGenerating}
+                                    style={{ marginTop: '8px' }}
+                                />
+                                <small>{t('settings.temperatureDesc')}</small>
+                            </div>
+
+                            <div className="setting-row">
+                                <div className="setting-group">
+                                    <label>{t('settings.topP')} ({localConfig.topP})</label>
+                                    <input
+                                        type="range"
+                                        name="topP"
+                                        min="0"
+                                        max="1"
+                                        step="0.05"
+                                        value={localConfig.topP}
+                                        onChange={handleChange}
+                                        disabled={isGenerating}
+                                    />
+                                    <small>{t('settings.topPDesc')}</small>
+                                </div>
+
+                                <div className="setting-group">
+                                    <label>{t('settings.topK')} ({localConfig.topK})</label>
+                                    <input
+                                        type="number"
+                                        name="topK"
+                                        value={localConfig.topK}
+                                        onChange={handleChange}
+                                        disabled={isGenerating}
+                                    />
+                                    <small>{t('settings.topKDesc')}</small>
+                                </div>
+                            </div>
+
+                            <div className="setting-group" style={{ marginBottom: '20px' }}>
+                                <label>{t('settings.maxTokens')} ({localConfig.maxTokens})</label>
+                                <input
+                                    type="number"
+                                    name="maxTokens"
+                                    step="128"
+                                    min="256"
+                                    max="4096"
+                                    value={localConfig.maxTokens}
+                                    onChange={handleChange}
+                                    disabled={isGenerating}
+                                />
+                                <small>{t('settings.maxTokensDesc')}</small>
+                            </div>
+
+                            <button
+                                type="button"
+                                className="secondary-btn"
+                                onClick={() => {
+                                    setLocalConfig(prev => ({
+                                        ...prev,
+                                        systemPrompt: '',
+                                        temperature: 0.7,
+                                        topP: 0.9,
+                                        topK: 40,
+                                        maxTokens: 2000
+                                    }));
+                                }}
+                                style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                            >
+                                🔄 {t('settings.resetParams')}
+                            </button>
+                        </div>
+                    )}
+
+                    {/* TAB 3: VOICE & UI LANGUAGE */}
+                    {activeTab === 'voice' && (
+                        <div style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
+                            {/* Interface Language */}
+                            <div className="setting-group" style={{ marginBottom: '20px' }}>
+                                <label style={{ fontSize: '0.95rem', fontWeight: 600 }}>🌐 {t('settings.language')}</label>
+                                <select
+                                    value={getLanguage()}
+                                    onChange={async (e) => {
+                                        const newLang = e.target.value;
+                                        setLanguage(newLang);
+                                        await setUserLanguage(newLang);
+                                        window.location.reload();
+                                    }}
+                                    disabled={isGenerating}
+                                    style={{ marginTop: '6px' }}
+                                >
+                                    <option value="ja">日本語 (Japanese)</option>
+                                    <option value="en">English</option>
+                                </select>
+                                <small>{t('settings.languageDesc')}</small>
+                            </div>
+
+                            {/* Voice Settings */}
+                            {typeof window !== 'undefined' && window.speechSynthesis && (
+                                <div style={{ background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                                        <h4 style={{ margin: 0, fontSize: '0.95rem', color: 'var(--color-accent)' }}>
+                                            🔊 {t('settings.voiceSettings')}
+                                        </h4>
+                                        <button
+                                            type="button"
+                                            className="secondary-btn"
+                                            onClick={testSpeechVoice}
+                                            style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                                        >
+                                            ▶️ {getLanguage() === 'ja' ? '声をテスト試聴' : 'Test Voice'}
+                                        </button>
+                                    </div>
+
+                                    <div className="setting-row">
+                                        <div className="setting-group">
+                                            <label>{t('settings.recognitionLanguage')}</label>
+                                            <select
+                                                name="recognitionLanguage"
+                                                value={localConfig.recognitionLanguage || 'ja-JP'}
+                                                onChange={handleChange}
+                                                disabled={isGenerating}
+                                            >
+                                                <option value="ja-JP">日本語 (ja-JP)</option>
+                                                <option value="en-US">English (en-US)</option>
+                                            </select>
+                                        </div>
+
+                                        <div className="setting-group">
+                                            <label>{t('settings.voiceName')}</label>
+                                            <select
+                                                name="voiceName"
+                                                value={localConfig.voiceName || ''}
+                                                onChange={handleChange}
+                                                disabled={isGenerating}
+                                            >
+                                                <option value="">Default OS Voice</option>
+                                                {availableVoices.map((voice) => (
+                                                    <option key={voice.name} value={voice.name}>
+                                                        {voice.name} ({voice.lang})
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="setting-row">
+                                        <div className="setting-group">
+                                            <label>{t('settings.formattedPitch') ? t('settings.formattedPitch').replace('{value}', localConfig.voicePitch || 1.0) : `Pitch: ${localConfig.voicePitch || 1.0}`}</label>
+                                            <input
+                                                type="range"
+                                                name="voicePitch"
+                                                min="0.5"
+                                                max="2"
+                                                step="0.1"
+                                                value={localConfig.voicePitch || 1.0}
+                                                onChange={handleChange}
+                                                disabled={isGenerating}
+                                            />
+                                        </div>
+
+                                        <div className="setting-group">
+                                            <label>{t('settings.formattedRate') ? t('settings.formattedRate').replace('{value}', localConfig.voiceRate || 1.0) : `Rate: ${localConfig.voiceRate || 1.0}`}</label>
+                                            <input
+                                                type="range"
+                                                name="voiceRate"
+                                                min="0.5"
+                                                max="2"
+                                                step="0.1"
+                                                value={localConfig.voiceRate || 1.0}
+                                                onChange={handleChange}
+                                                disabled={isGenerating}
+                                            />
                                         </div>
                                     </div>
 
                                     <div className="setting-group" style={{ marginTop: '10px' }}>
-                                        <label>Or Add Local File (.gguf)</label>
-                                        <input
-                                            type="file"
-                                            accept=".gguf"
-                                            onChange={handleFileUpload}
-                                            disabled={isAddingModel}
-                                        />
-                                        <small>File will be cached in browser storage. (Warning: Larger files may fail depending on browser limits)</small>
-                                    </div>
-                                </div>
-
-                                {/* LM Studio Integration */}
-                                <div style={{ marginTop: '2rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
-                                    <h4 style={{ marginBottom: '12px', color: 'var(--color-accent)', fontSize: '0.9rem' }}>
-                                        🤖 LM Studio Integration
-                                    </h4>
-                                    <div className="setting-group">
                                         <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px' }}>
                                             <input
                                                 type="checkbox"
-                                                checked={localLMStudioConfig.enabled}
-                                                onChange={(e) => setLocalLMStudioConfig(prev => ({ ...prev, enabled: e.target.checked }))}
-                                                disabled={isGenerating}
+                                                name="realTimeSpeech"
+                                                checked={localConfig.realTimeSpeech || false}
+                                                onChange={(e) => setLocalConfig(prev => ({ ...prev, realTimeSpeech: e.target.checked }))}
+                                                style={{ width: 'auto', margin: 0 }}
                                             />
-                                            <span>Enable LM Studio (or OpenAI compatible)</span>
+                                            <span>{t('settings.realTimeSpeech')}</span>
                                         </label>
                                     </div>
-                                    {localLMStudioConfig.enabled && (
-                                        <div style={{ paddingLeft: '20px' }}>
-                                            <div className="setting-group">
-                                                <label>Base URL</label>
-                                                <input
-                                                    type="text"
-                                                    value={localLMStudioConfig.baseUrl}
-                                                    onChange={(e) => setLocalLMStudioConfig(prev => ({ ...prev, baseUrl: e.target.value }))}
-                                                    placeholder="http://localhost:1234/v1"
-                                                />
-                                            </div>
-                                            <div className="setting-group">
-                                                <div className="setting-group">
-                                                    <label>Model ID {lmStudioModels.length > 0 && <span style={{ fontSize: '0.8em', color: 'green' }}>({lmStudioModels.length} found)</span>}</label>
-                                                    {lmStudioModels.length > 0 ? (
-                                                        <select
-                                                            value={localLMStudioConfig.modelId}
-                                                            onChange={(e) => {
-                                                                const newModelId = e.target.value;
-                                                                setLocalLMStudioConfig(prev => ({ ...prev, modelId: newModelId }));
-                                                                // Auto-apply when selected from dropdown
-                                                                if (newModelId) {
-                                                                    applyLMStudioModel(newModelId);
-                                                                }
-                                                            }}
-                                                        >
-                                                            <option value="">Select a model...</option>
-                                                            {lmStudioModels.map(m => (
-                                                                <option key={m.id} value={m.id}>{m.id}</option>
-                                                            ))}
-                                                        </select>
-                                                    ) : (
-                                                        <input
-                                                            type="text"
-                                                            value={localLMStudioConfig.modelId}
-                                                            onChange={(e) => setLocalLMStudioConfig(prev => ({ ...prev, modelId: e.target.value }))}
-                                                            placeholder="local-model"
-                                                        />
-                                                    )}
-                                                    <div style={{ display: 'flex', gap: '15px', marginTop: '8px', fontSize: '0.9em' }}>
-                                                        {isLoadingLMModels ? 'Fetching models...' : (
-                                                            <a href="#" onClick={(e) => { e.preventDefault(); fetchLMStudioModels(); }} style={{ color: 'var(--color-accent)' }}>
-                                                                🔄 Refresh Models
-                                                            </a>
-                                                        )}
-                                                        {localLMStudioConfig.modelId && (
-                                                            <a href="#" onClick={async (e) => {
-                                                                e.preventDefault();
-                                                                // Trigger a dry run or explicit load to "switch" the model
-                                                                try {
-                                                                    const baseUrl = localLMStudioConfig.baseUrl.replace(/\/$/, '');
-
-                                                                    // 1. Try to "Identify currently loaded" - Best effort
-                                                                    // Note: Standard API doesn't always return 'loaded' state in /models
-                                                                    // We will skip strict identification and assume we need to switch if the user clicked this.
-
-                                                                    // 2. Try to "Eject" current model (heuristic endpoints)
-                                                                    try {
-                                                                        console.log("Attempting to unload/eject current model...");
-                                                                        // Try common unload endpoints
-                                                                        await fetch(`${baseUrl}/models/unload`, { method: 'POST', body: JSON.stringify({}) }).catch(() => { });
-                                                                        await fetch(`${baseUrl}/internal/eject_model`, { method: 'POST', body: JSON.stringify({}) }).catch(() => { });
-                                                                    } catch (e) {
-                                                                        // Ignore unload errors, it might not be supported
-                                                                        console.log("Unload not supported or failed, proceeding to load.");
-                                                                    }
-
-                                                                    // 3. Load new model via Chat Completion (Standard OpenAI way to force load)
-                                                                    const url = `${baseUrl}/chat/completions`;
-                                                                    // We just send a dummy request with max_tokens 1 to trigger loading
-                                                                    const res = await fetch(url, {
-                                                                        method: 'POST',
-                                                                        headers: { 'Content-Type': 'application/json' },
-                                                                        body: JSON.stringify({
-                                                                            model: localLMStudioConfig.modelId,
-                                                                            messages: [{ role: 'user', content: 'test' }],
-                                                                            max_tokens: 1
-                                                                        })
-                                                                    });
-
-                                                                    if (res.ok) {
-                                                                        alert("Model switch triggered successfully! (Legacy model ejected if possible)");
-                                                                        // Also save config
-                                                                        if (onSaveLMStudioConfig) onSaveLMStudioConfig(localLMStudioConfig);
-                                                                    } else {
-                                                                        alert("Failed to trigger load. Check server logs.");
-                                                                    }
-                                                                } catch (err) {
-                                                                    console.error(err);
-                                                                    alert("Error: " + err.message);
-                                                                }
-                                                            }} style={{ color: 'var(--color-accent)', fontWeight: 'bold' }}>
-                                                                ⚡ Apply / Load
-                                                            </a>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
                                 </div>
-                            </div>
+                            )}
+                        </div>
+                    )}
 
-                            <div className="setting-row">
-                                <div className="setting-group">
-                                    <label>Batch Size (n_batch)</label>
-                                    <select
-                                        name="n_batch"
-                                        value={localModelConfig.n_batch}
-                                        onChange={handleModelConfigChange}
-                                        disabled={isGenerating}
-                                    >
-                                        <option value={256}>256</option>
-                                        <option value={512}>512 (Default)</option>
-                                        <option value={1024}>1024</option>
-                                        <option value={2048}>2048</option>
-                                    </select>
-                                    <small>Larger = faster prompt processing</small>
-                                </div>
+                    {/* TAB 4: EXTERNAL (LM STUDIO) */}
+                    {isGlobal && activeTab === 'external' && (
+                        <div style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
+                            <div style={{ background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                                <h4 style={{ margin: '0 0 12px 0', fontSize: '0.95rem', color: 'var(--color-accent)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span>🤖</span>
+                                    <span>LM Studio / Local Server Integration</span>
+                                </h4>
+                                <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '14px', lineHeight: 1.4 }}>
+                                    {getLanguage() === 'ja'
+                                        ? 'LM StudioやOllamaなどのローカルOpenAI互換サーバーに接続し、PC上の別モデルを使用できます。'
+                                        : 'Connect to LM Studio or Ollama (OpenAI compatible server) to use models running on your local machine.'}
+                                </p>
 
-                                <div className="setting-group">
-                                    <label>Flash Attention</label>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                                <div className="setting-group" style={{ marginBottom: '14px' }}>
+                                    <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px' }}>
                                         <input
                                             type="checkbox"
-                                            name="flash_attn"
-                                            checked={localModelConfig.flash_attn}
-                                            onChange={handleModelConfigChange}
+                                            checked={localLMStudioConfig.enabled}
+                                            onChange={(e) => setLocalLMStudioConfig(prev => ({ ...prev, enabled: e.target.checked }))}
                                             disabled={isGenerating}
                                             style={{ width: 'auto', margin: 0 }}
                                         />
-                                        <span>Enable Flash Attention</span>
+                                        <span style={{ fontWeight: 600 }}>
+                                            {getLanguage() === 'ja' ? 'LM Studio連携を有効化する' : 'Enable LM Studio (OpenAI Compatible)'}
+                                        </span>
+                                    </label>
+                                </div>
+
+                                {localLMStudioConfig.enabled && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                        <div className="setting-group">
+                                            <label>Base URL</label>
+                                            <input
+                                                type="text"
+                                                value={localLMStudioConfig.baseUrl}
+                                                onChange={(e) => setLocalLMStudioConfig(prev => ({ ...prev, baseUrl: e.target.value }))}
+                                                placeholder="http://localhost:1234/v1"
+                                            />
+                                        </div>
+
+                                        <div className="setting-group">
+                                            <label>Model ID {lmStudioModels.length > 0 && <span style={{ color: '#4ade80' }}>({lmStudioModels.length} models found)</span>}</label>
+                                            {lmStudioModels.length > 0 ? (
+                                                <select
+                                                    value={localLMStudioConfig.modelId}
+                                                    onChange={(e) => {
+                                                        const newModelId = e.target.value;
+                                                        setLocalLMStudioConfig(prev => ({ ...prev, modelId: newModelId }));
+                                                        if (newModelId) applyLMStudioModel(newModelId);
+                                                    }}
+                                                >
+                                                    <option value="">Select a model...</option>
+                                                    {lmStudioModels.map(m => (
+                                                        <option key={m.id} value={m.id}>{m.id}</option>
+                                                    ))}
+                                                </select>
+                                            ) : (
+                                                <input
+                                                    type="text"
+                                                    value={localLMStudioConfig.modelId}
+                                                    onChange={(e) => setLocalLMStudioConfig(prev => ({ ...prev, modelId: e.target.value }))}
+                                                    placeholder="local-model"
+                                                />
+                                            )}
+                                        </div>
+
+                                        <div style={{ display: 'flex', gap: '12px' }}>
+                                            <button
+                                                type="button"
+                                                className="secondary-btn"
+                                                onClick={fetchLMStudioModels}
+                                                disabled={isLoadingLMModels}
+                                                style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                                            >
+                                                🔄 {isLoadingLMModels ? 'Connecting...' : (getLanguage() === 'ja' ? '接続テスト & モデル一覧取得' : 'Test & Fetch Models')}
+                                            </button>
+                                        </div>
                                     </div>
-                                    <small>Optimize attention computation</small>
-                                </div>
+                                )}
                             </div>
+                        </div>
+                    )}
 
-                            <div className="setting-row">
-                                <div className="setting-group">
-                                    <label>KV Cache Type (K)</label>
-                                    <select
-                                        name="cache_type_k"
-                                        value={localModelConfig.cache_type_k}
-                                        onChange={handleModelConfigChange}
-                                        disabled={isGenerating}
-                                    >
-                                        <option value="f32">f32 (Full)</option>
-                                        <option value="f16">f16 (Default)</option>
-                                        <option value="q8_0">q8_0 (Quantized)</option>
-                                        <option value="q4_0">q4_0 (Aggressive)</option>
-                                    </select>
-                                    <small>Lower = faster, less memory</small>
-                                </div>
-
-                                <div className="setting-group">
-                                    <label>KV Cache Type (V)</label>
-                                    <select
-                                        name="cache_type_v"
-                                        value={localModelConfig.cache_type_v}
-                                        onChange={handleModelConfigChange}
-                                        disabled={isGenerating}
-                                    >
-                                        <option value="f32">f32 (Full)</option>
-                                        <option value="f16">f16 (Default)</option>
-                                        <option value="q8_0">q8_0 (Quantized)</option>
-                                        <option value="q4_0">q4_0 (Aggressive)</option>
-                                    </select>
-                                    <small>Lower = faster, less memory</small>
-                                </div>
-                            </div>
-
-
-                            {/* Debug Section */}
-                            <div style={{ marginTop: '2rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
-                                <h4 style={{ marginBottom: '12px', color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
-                                    🔧 Debug & Danger Zone
+                    {/* TAB 5: STORAGE & RESET */}
+                    {isGlobal && activeTab === 'data' && (
+                        <div style={{ opacity: isGenerating ? 0.6 : 1, pointerEvents: isGenerating ? 'none' : 'auto' }}>
+                            <div style={{ background: 'rgba(239, 68, 68, 0.08)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                                <h4 style={{ margin: '0 0 10px 0', fontSize: '0.95rem', color: '#f87171', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span>⚠️</span>
+                                    <span>{t('settings.resetData')} (Danger Zone)</span>
                                 </h4>
-
-                                <div className="setting-group">
-                                    <label>{t('settings.resetData')}</label>
-                                    <button
-                                        onClick={async () => {
-                                            if (confirm(t('settings.resetDataDesc') + '\n\n' + t('chat.deleteConfirm'))) {
-                                                const { clearAllData } = await import('../services/history');
-                                                await clearAllData();
-                                                window.location.reload();
-                                            }
-                                        }}
-                                        className="action-btn-danger"
-                                        style={{ borderColor: 'rgba(239, 68, 68, 0.5)', background: 'transparent' }}
-                                    >
-                                        💣 {t('settings.resetData')}
-                                    </button>
-                                    <small>{t('settings.resetDataDesc')}</small>
-                                </div>
+                                <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '16px', lineHeight: 1.4 }}>
+                                    {t('settings.resetDataDesc')}
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        if (confirm(t('settings.resetDataDesc') + '\n\n' + t('chat.deleteConfirm'))) {
+                                            const { clearAllData } = await import('../services/history');
+                                            await clearAllData();
+                                            window.location.reload();
+                                        }
+                                    }}
+                                    className="action-btn-danger"
+                                    style={{ borderColor: 'rgba(239, 68, 68, 0.5)', background: 'transparent' }}
+                                >
+                                    💣 {t('settings.resetData')}
+                                </button>
                             </div>
                         </div>
                     )}
                 </div>
 
+                {/* Footer */}
                 <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap-reverse', gap: '10px' }}>
-                    {/* Left side: Defaults Checkbox */}
                     <div className="defaults-check" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input
-                            type="checkbox"
-                            id="saveAsDefault"
-                            checked={saveAsDefault}
-                            onChange={(e) => setSaveAsDefault(e.target.checked)}
-                            style={{ width: 'auto', margin: 0, cursor: 'pointer' }}
-                        />
-                        <label htmlFor="saveAsDefault" style={{ marginBottom: 0, cursor: 'pointer', fontSize: '0.9rem', color: 'var(--color-text-muted)' }}>
-                            {t('settings.saveAsDefault') || 'Save as new Default for future chats'}
-                        </label>
+                        {isGlobal && (
+                            <>
+                                <input
+                                    type="checkbox"
+                                    id="saveAsDefault"
+                                    checked={saveAsDefault}
+                                    onChange={(e) => setSaveAsDefault(e.target.checked)}
+                                    style={{ width: 'auto', margin: 0, cursor: 'pointer' }}
+                                />
+                                <label htmlFor="saveAsDefault" style={{ marginBottom: 0, cursor: 'pointer', fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                                    {t('settings.saveAsDefault')}
+                                </label>
+                            </>
+                        )}
                     </div>
 
-                    {/* Right side: Actions */}
                     <div style={{ display: 'flex', gap: '10px' }}>
                         <button
+                            type="button"
                             onClick={onClose}
                             className="btn-secondary"
                         >
                             {t('common.cancel')}
                         </button>
                         <button
+                            type="button"
                             onClick={handleSave}
                             className="btn-primary"
                             disabled={isGenerating}
@@ -1022,8 +1283,7 @@ export default function SettingsModal({
                         </button>
                     </div>
                 </div>
-            </div >
-        </div >
+            </div>
+        </div>
     );
-
 }
