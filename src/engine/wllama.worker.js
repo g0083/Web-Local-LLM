@@ -1,0 +1,444 @@
+﻿// Polyfill for document in worker if needed
+if (typeof document === 'undefined') {
+    self.document = {
+        baseURI: self.location.href
+    };
+}
+
+// Polyfill for crypto.subtle.digest (SHA-256) for non-secure contexts (e.g. mobile IP access)
+(function () {
+    try {
+        let cryptoObj = self.crypto;
+        if (!cryptoObj) {
+            try {
+                Object.defineProperty(self, 'crypto', {
+                    value: { subtle: {} },
+                    writable: true,
+                    configurable: true
+                });
+                cryptoObj = self.crypto;
+            } catch (e) {
+                console.warn("Could not define self.crypto", e);
+            }
+        }
+
+        if (cryptoObj) {
+            if (!cryptoObj.subtle) {
+                try {
+                    Object.defineProperty(cryptoObj, 'subtle', {
+                        value: {},
+                        writable: true,
+                        configurable: true
+                    });
+                } catch (e) {
+                    cryptoObj.subtle = {};
+                }
+            }
+
+            if (cryptoObj.subtle && !cryptoObj.subtle.digest) {
+                cryptoObj.subtle.digest = async function (algorithm, data) {
+                    if (algorithm === 'SHA-256' || algorithm.name === 'SHA-256') {
+                        const msgBuffer = new Uint8Array(data);
+                        const h = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+                        const k = [
+                            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+                            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+                            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+                            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+                            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+                            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+                            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+                            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+                        ];
+                        const len = msgBuffer.length * 8;
+                        const preProcessed = new Uint8Array(((msgBuffer.length + 8) >>> 6 !== 0 ? ((msgBuffer.length + 8) >>> 6) + 1 : 1) * 64);
+                        preProcessed.set(msgBuffer);
+                        preProcessed[msgBuffer.length] = 0x80;
+
+                        const view = new DataView(preProcessed.buffer);
+                        view.setUint32(preProcessed.length - 8, Math.floor(len / 4294967296), false);
+                        view.setUint32(preProcessed.length - 4, len % 4294967296, false);
+
+                        for (let i = 0; i < preProcessed.length; i += 64) {
+                            const w = new Uint32Array(64);
+                            for (let j = 0; j < 16; j++) {
+                                w[j] = view.getUint32(i + j * 4, false);
+                            }
+                            for (let j = 16; j < 64; j++) {
+                                const s0 = (w[j - 15] >>> 7 | w[j - 15] << 25) ^ (w[j - 15] >>> 18 | w[j - 15] << 14) ^ (w[j - 15] >>> 3);
+                                const s1 = (w[j - 2] >>> 17 | w[j - 2] << 15) ^ (w[j - 2] >>> 19 | w[j - 2] << 13) ^ (w[j - 2] >>> 10);
+                                w[j] = (w[j - 16] + s0 + w[j - 7] + s1) | 0;
+                            }
+
+                            let [a, b, c, d, e, f, g, hh] = h;
+                            for (let j = 0; j < 64; j++) {
+                                const S1 = (e >>> 6 | e << 26) ^ (e >>> 11 | e << 21) ^ (e >>> 25 | e << 7);
+                                const ch = (e & f) ^ (~e & g);
+                                const temp1 = (hh + S1 + ch + k[j] + w[j]) | 0;
+                                const S0 = (a >>> 2 | a << 30) ^ (a >>> 13 | a << 19) ^ (a >>> 22 | a << 10);
+                                const maj = (a & b) ^ (a & c) ^ (b & c);
+                                const temp2 = (S0 + maj) | 0;
+
+                                hh = g; g = f; f = e; e = (d + temp1) | 0;
+                                d = c; c = b; b = a; a = (temp1 + temp2) | 0;
+                            }
+
+                            h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0;
+                            h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+                            h[4] = (h[4] + e) | 0; h[5] = (h[5] + f) | 0;
+                            h[6] = (h[6] + g) | 0; h[7] = (h[7] + hh) | 0;
+                        }
+
+                        const buffer = new ArrayBuffer(32);
+                        const outView = new DataView(buffer);
+                        for (let i = 0; i < 8; i++) {
+                            outView.setUint32(i * 4, h[i], false);
+                        }
+                        return buffer;
+                    }
+                    throw new Error("Algorithm not supported by polyfill");
+                };
+            }
+        }
+    } catch (err) {
+        console.error("Polyfill injection failed:", err);
+    }
+})();
+
+import { Wllama } from '@wllama/wllama';
+
+let wllama = null;
+let currentAbortController = null;
+let titleAbortController = null;
+let downloadAbortController = null;
+let isBusy = false;
+
+// Wllama v3 single WASM asset path
+const CONFIG = {
+    wllama: {
+        default: '/wllama/wllama.wasm',
+    },
+};
+
+function getWllamaInstance() {
+    if (!wllama) {
+        wllama = new Wllama(CONFIG.wllama);
+    }
+    return wllama;
+}
+
+async function initialize(modelConfig = {}) {
+    console.log('[Worker] Starting initialization with config:', modelConfig);
+    postMessage({ type: 'debug', message: 'Worker starting initialization' });
+
+    if (wllama) {
+        console.log('[Worker] Existing wllama instance found, exiting...');
+        postMessage({ type: 'debug', message: 'Exiting existing wllama instance' });
+        try {
+            await wllama.exit();
+        } catch (e) {
+            console.log('[Worker] Error exiting wllama:', e);
+        }
+        wllama = null;
+    }
+
+    wllama = new Wllama(CONFIG.wllama);
+
+    const modelUrl = modelConfig.model_url;
+    if (!modelUrl) {
+        console.error('[Worker] No model_url provided');
+        postMessage({ type: 'error', message: 'No model URL provided' });
+        return;
+    }
+
+    console.log('[Worker] Loading model from URL:', modelUrl);
+    postMessage({ type: 'status', message: 'Loading model...' });
+
+    // Check WebGPU capability
+    const hasWebGPU = typeof navigator !== 'undefined' && !!navigator.gpu;
+    console.log('[Worker] WebGPU detected:', hasWebGPU);
+
+    const nThreads = modelConfig.n_threads || (typeof navigator !== 'undefined' ? Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 8)) : 4);
+    const nCtx = modelConfig.n_ctx || 4096;
+    const nGpuLayers = modelConfig.n_gpu_layers ?? -1;
+
+    try {
+        await wllama.loadModelFromUrl(modelUrl, {
+            n_ctx: nCtx,
+            n_batch: modelConfig.n_batch || 512,
+            n_gpu_layers: nGpuLayers,
+            cache_type_k: modelConfig.cache_type_k || 'q8_0',
+            cache_type_v: modelConfig.cache_type_v || 'q8_0',
+            flash_attn: modelConfig.flash_attn ?? true,
+            n_threads: nThreads,
+            useCache: true,
+            progressCallback: ({ loaded, total }) => {
+                const percentage = total > 0 ? Math.round((loaded / total) * 100) : 0;
+                postMessage({
+                    type: 'progress',
+                    loaded,
+                    total,
+                    percentage
+                });
+            }
+        });
+
+        console.log('[Worker] Model loaded successfully');
+        postMessage({ type: 'debug', message: 'Model loaded successfully' });
+        postMessage({
+            type: 'ready',
+            data: {
+                hasWebGPU,
+                isMultithread: wllama.isMultithread(),
+                threads: wllama.getNumThreads()
+            }
+        });
+    } catch (error) {
+        console.error('[Worker] Error loading model:', error);
+        postMessage({
+            type: 'error',
+            message: error.message || 'Failed to load model',
+            debug: error.stack
+        });
+    }
+}
+
+async function runCompletion(messages, config, jobId) {
+    if (!wllama || !wllama.isModelLoaded()) {
+        throw new Error('Model is not loaded yet');
+    }
+
+    let abortController;
+    if (jobId === 'title_gen') {
+        if (titleAbortController) {
+            titleAbortController.abort();
+        }
+        titleAbortController = new AbortController();
+        abortController = titleAbortController;
+    } else {
+        if (currentAbortController) {
+            currentAbortController.abort();
+        }
+        currentAbortController = new AbortController();
+        abortController = currentAbortController;
+    }
+
+    // Mutex lock: wait for any previous generation to finish
+    while (isBusy) {
+        if (abortController.signal.aborted) return;
+        await new Promise(r => setTimeout(r, 40));
+    }
+    isBusy = true;
+
+    try {
+        // Construct OpenAI-compatible messages array
+        const formattedMessages = [];
+        if (config?.systemPrompt && jobId !== 'title_gen') {
+            formattedMessages.push({ role: 'system', content: config.systemPrompt });
+        }
+
+        for (const msg of messages) {
+            formattedMessages.push({
+                role: msg.role === 'assistant' ? 'assistant' : (msg.role === 'system' ? 'system' : 'user'),
+                content: msg.content
+            });
+        }
+
+        const maxTokens = config?.maxTokens || (jobId === 'title_gen' ? 24 : 2048);
+        const temperature = config?.temperature ?? (jobId === 'title_gen' ? 0.3 : 0.1);
+        const topP = config?.topP ?? 0.95;
+        const topK = config?.topK ?? 50;
+
+        const startTime = performance.now();
+        let firstTokenTime = 0;
+        let nTokens = 0;
+        let fullResponse = '';
+
+        // Use modern OAI-compatible createChatCompletion streaming
+        const stream = await wllama.createChatCompletion({
+            messages: formattedMessages,
+            stream: true,
+            max_tokens: maxTokens,
+            temperature,
+            top_p: topP,
+            top_k: topK,
+            abortSignal: abortController.signal,
+        });
+
+        for await (const chunk of stream) {
+            if (abortController.signal.aborted) break;
+
+            const delta = chunk.choices[0]?.delta?.content;
+            if (delta) {
+                if (nTokens === 0) {
+                    firstTokenTime = performance.now();
+                }
+                nTokens++;
+                fullResponse += delta;
+                postMessage({ type: 'token', data: { token: delta, jobId } });
+            }
+        }
+
+        const endTime = performance.now();
+        const duration = endTime - startTime;
+        const ttft = firstTokenTime ? (firstTokenTime - startTime) : 0;
+        const tps = duration > 0 ? (nTokens / (duration / 1000)) : 0;
+
+        if (abortController.signal.aborted) {
+            const err = new Error('Aborted');
+            err.name = 'AbortError';
+            throw err;
+        }
+
+        if (jobId === 'title_gen') {
+            titleAbortController = null;
+        } else {
+            currentAbortController = null;
+        }
+
+        postMessage({
+            type: 'complete',
+            data: {
+                text: fullResponse,
+                jobId,
+                stats: {
+                    duration,
+                    ttft,
+                    tps,
+                    nTokens
+                }
+            }
+        });
+    } catch (e) {
+        if (e.name !== 'AbortError') {
+            console.error('[Worker] Completion Error:', e);
+            postMessage({ type: 'error', data: { error: e.message, jobId } });
+        } else {
+            postMessage({ type: 'aborted', data: { jobId } });
+        }
+    } finally {
+        isBusy = false;
+    }
+}
+
+self.onmessage = async (e) => {
+    const { type, data } = e.data;
+    const action = e.data.action || type;
+
+    try {
+        switch (action) {
+            case 'init':
+                await initialize(data?.modelConfig);
+                break;
+
+            case 'chat':
+                await runCompletion(data.messages, data.config, data.jobId);
+                break;
+
+            case 'abort':
+                if (currentAbortController) {
+                    currentAbortController.abort();
+                    currentAbortController = null;
+                }
+                break;
+
+            case 'abort_title':
+                if (titleAbortController) {
+                    titleAbortController.abort();
+                    titleAbortController = null;
+                }
+                break;
+
+            case 'download': {
+                const { url } = data || e.data;
+                if (!url) throw new Error('Download URL required');
+
+                downloadAbortController = new AbortController();
+                const instance = getWllamaInstance();
+
+                await instance.modelManager.downloadModel(
+                    { url },
+                    {
+                        signal: downloadAbortController.signal,
+                        progressCallback: ({ loaded, total }) => {
+                            const percentage = total > 0 ? Math.round((loaded / total) * 100) : 0;
+                            postMessage({
+                                type: 'progress',
+                                loaded,
+                                total,
+                                percentage
+                            });
+                        }
+                    }
+                );
+
+                postMessage({ type: 'download_complete', url });
+                break;
+            }
+
+            case 'download-abort':
+                if (downloadAbortController) {
+                    downloadAbortController.abort();
+                    downloadAbortController = null;
+                }
+                break;
+
+            case 'list_models': {
+                try {
+                    const instance = getWllamaInstance();
+                    const entries = await instance.cacheManager.list();
+                    const models = entries.map(entry => {
+                        const originalUrl = entry.metadata?.originalURL || '';
+                        let displayName = entry.name;
+                        if (originalUrl) {
+                            const filename = originalUrl.split('/').pop().replace(/\?.*$/, '');
+                            displayName = filename;
+                        }
+                        return {
+                            name: displayName,
+                            cacheName: entry.name,
+                            size: entry.size || entry.metadata?.originalSize || 0,
+                            url: originalUrl,
+                        };
+                    });
+                    postMessage({ type: 'models_list', models });
+                } catch (err) {
+                    console.warn('[Worker] Failed to list models:', err);
+                    postMessage({ type: 'models_list', models: [] });
+                }
+                break;
+            }
+
+            case 'delete_model': {
+                const { cacheName } = data || {};
+                try {
+                    const instance = getWllamaInstance();
+                    if (cacheName) {
+                        await instance.cacheManager.delete(cacheName);
+                    }
+                    postMessage({ type: 'model_deleted', cacheName });
+                } catch (err) {
+                    console.error('[Worker] Failed to delete model:', err);
+                }
+                break;
+            }
+
+            case 'clear_cache': {
+                try {
+                    const instance = getWllamaInstance();
+                    await instance.cacheManager.clear();
+                    postMessage({ type: 'cleared' });
+                } catch (err) {
+                    console.error('[Worker] Failed to clear cache:', err);
+                }
+                break;
+            }
+
+            default:
+                console.warn('[Worker] Unknown action:', action);
+        }
+    } catch (err) {
+        console.error('[Worker] Error handling message:', err);
+        postMessage({ type: 'error', message: err.message });
+    }
+};
