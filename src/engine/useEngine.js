@@ -109,9 +109,19 @@ export function useEngine(skipInit = false) {
             // Handle Title Generation Job
             if (data && data.jobId === 'title_gen') {
                 if (type === 'complete') {
-                    // Extract title from response
-                    let title = data.text.trim();
-                    title = title.replace(/^["']|["']$/g, '');
+                    // Extract title cleanly, removing any <think> tags or quotes
+                    let title = (data.text || '').trim();
+                    title = title.replace(/<think>[\s\S]*?<\/think>/gi, '');
+                    title = title.replace(/<think>[\s\S]*/gi, '');
+                    title = title.replace(/<\/think>/gi, '');
+                    title = title.replace(/^(Title|タイトル)[:：]\s*/i, '');
+                    title = title.replace(/^[\s"'#*`]+|[\s"'#*`]+$/g, '').trim();
+
+                    if (!title || title.length < 2) {
+                        const firstUserMsg = messages.find(m => m.role === 'user')?.content || '';
+                        title = firstUserMsg.trim().slice(0, 24).replace(/[\r\n]+/g, ' ') || 'New Chat';
+                    }
+
                     // Use ref for current ID
                     if (currentSessionIdRef.current) {
                         updateSession(currentSessionIdRef.current, { title }).then(() => {
@@ -395,7 +405,7 @@ export function useEngine(skipInit = false) {
             type: 'chat',
             data: {
                 messages: [{ role: 'user', content: prompt }],
-                config: { maxTokens: 20 }, // Short gen
+                config: { maxTokens: 100 }, // Short gen
                 jobId: 'title_gen' // Custom tag
             },
         });

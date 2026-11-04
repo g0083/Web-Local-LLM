@@ -306,13 +306,16 @@ async function runCompletion(messages, config, jobId) {
                 let tokenPiece = '';
 
                 if (reasoningText) {
-                    if (!isInReasoning) {
-                        isInReasoning = true;
-                        tokenPiece += '<think>\n';
+                    // Suppress reasoning tokens for title_gen so title never gets think content
+                    if (jobId !== 'title_gen') {
+                        if (!isInReasoning) {
+                            isInReasoning = true;
+                            tokenPiece += '<think>\n';
+                        }
+                        tokenPiece += reasoningText;
                     }
-                    tokenPiece += reasoningText;
                 } else if (contentText) {
-                    if (isInReasoning) {
+                    if (isInReasoning && jobId !== 'title_gen') {
                         isInReasoning = false;
                         tokenPiece += '\n</think>\n\n';
                     }
@@ -329,7 +332,7 @@ async function runCompletion(messages, config, jobId) {
                 }
             }
 
-            if (isInReasoning) {
+            if (isInReasoning && jobId !== 'title_gen') {
                 const closeTag = '\n</think>\n\n';
                 fullResponse += closeTag;
                 postMessage({ type: 'token', data: { token: closeTag, jobId } });

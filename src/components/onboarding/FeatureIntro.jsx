@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { t, getLanguage } from '../../utils/i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -25,7 +25,7 @@ const FeatureIntro = ({ onComplete, onSkip, generateIntro }) => {
         const language = getLanguage();
         const features = t('features');
 
-        // Create a prompt for the LLM to introduce the app
+        // Create a prompt for the LLM to introduce the app directly
         const prompt = language === 'ja'
             ? `あなたはWeb Local LLMアプリのアシスタントです。このアプリの主な特徴を紹介してください。以下の機能について、親しみやすく簡潔に説明してください:\n\n${features.map((f, i) => `${i + 1}. ${f}`).join('\n')}\n\n各機能について1-2文で説明し、全体で200文字程度にまとめてください。`
             : `You are an assistant for the Web Local LLM app. Please introduce the key features of this application. Describe the following features in a friendly and concise way:\n\n${features.map((f, i) => `${i + 1}. ${f}`).join('\n')}\n\nKeep each feature description to 1-2 sentences, with the entire introduction around 150 words.`;
@@ -33,16 +33,17 @@ const FeatureIntro = ({ onComplete, onSkip, generateIntro }) => {
         try {
             console.log('[FeatureIntro] Starting intro generation');
             await generateIntro(prompt, (chunk) => {
-                console.log('[FeatureIntro] Received chunk:', chunk, 'charCodes:', [...chunk].map(c => c.charCodeAt(0)));
                 setIntroText(prev => prev + chunk);
             });
             console.log('[FeatureIntro] Intro generation complete');
             setIsGenerating(false);
             setIntroText(prev => {
-                if (!prev || !prev.trim()) {
-                    return language === 'ja'
+                const clean = prev ? prev.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<think>[\s\S]*/gi, '').trim() : '';
+                if (!clean) {
+                    const fallbackMessage = language === 'ja'
                         ? 'Web Local LLMへようこそ！このアプリはブラウザ内で完全にローカルに動作するAIチャットアプリです。データは外部に送信されず、プライバシーが保護されます。複数のモデルから選択でき、オフラインでも動作します。'
                         : 'Welcome to Web Local LLM! This app runs entirely locally in your browser, ensuring your privacy. Choose from multiple models, customize settings, and chat offline.';
+                    return prev ? `${prev}\n\n${fallbackMessage}` : fallbackMessage;
                 }
                 return prev;
             });
@@ -50,7 +51,6 @@ const FeatureIntro = ({ onComplete, onSkip, generateIntro }) => {
         } catch (error) {
             console.error('[FeatureIntro] Failed to generate introduction:', error);
             setIsGenerating(false);
-            // Show a fallback message
             const fallbackMessage = language === 'ja'
                 ? 'Web Local LLMへようこそ！このアプリはブラウザ内で完全にローカルに動作するAIチャットアプリです。データは外部に送信されず、プライバシーが保護されます。複数のモデルから選択でき、オフラインでも動作します。'
                 : 'Welcome to Web Local LLM! This app runs entirely locally in your browser, ensuring your privacy. Choose from multiple models, customize settings, and chat offline.';
@@ -58,6 +58,26 @@ const FeatureIntro = ({ onComplete, onSkip, generateIntro }) => {
             setIsComplete(true);
         }
     };
+
+    const parsedIntro = useMemo(() => {
+        if (!introText) return { thinking: null, text: '' };
+
+        const thinkStart = introText.indexOf('<think>');
+        if (thinkStart === -1) {
+            return { thinking: null, text: introText };
+        }
+
+        const thinkEnd = introText.indexOf('</think>');
+        if (thinkEnd !== -1) {
+            const thinkContent = introText.slice(thinkStart + 7, thinkEnd).trim();
+            const restContent = (introText.slice(0, thinkStart) + introText.slice(thinkEnd + 8)).trim();
+            return { thinking: thinkContent, text: restContent, isComplete: true };
+        } else {
+            const thinkContent = introText.slice(thinkStart + 7).trim();
+            const preContent = introText.slice(0, thinkStart).trim();
+            return { thinking: thinkContent, text: preContent, isComplete: false };
+        }
+    }, [introText]);
 
     return (
         <div className="onboarding-container">
@@ -68,21 +88,37 @@ const FeatureIntro = ({ onComplete, onSkip, generateIntro }) => {
                 </div>
 
                 <div className="intro-message-container">
-                    {isGenerating && introText === '' && (
+                    {/* Collapsible Thinking Process if model used thinking */}
+                    {parsedIntro.thinking && (
+                        <div style={{ marginBottom: '14px', width: '100%' }}>
+                            <details style={{ background: 'rgba(0,0,0,0.25)', borderRadius: '8px', padding: '8px 12px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                                <summary style={{ cursor: 'pointer', color: 'var(--color-accent)', fontSize: '0.85rem', fontWeight: 500 }}>
+                                    🧠 {getLanguage() === 'ja' ? '思考プロセス' : 'Thinking Process'} {parsedIntro.isComplete ? (getLanguage() === 'ja' ? '(完了)' : '(Complete)') : '...'}
+                                </summary>
+                                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '8px', whiteSpace: 'pre-wrap', maxHeight: '160px', overflowY: 'auto', lineHeight: '1.4' }}>
+                                    {parsedIntro.thinking}
+                                </div>
+                            </details>
+                        </div>
+                    )}
+
+                    {/* Loading indicator when waiting or thinking before final text */}
+                    {isGenerating && !parsedIntro.text && (
                         <div className="intro-loading">
                             <div className="spinner"></div>
-                            <p>{t('featureIntro.generating')}</p>
+                            <p>{parsedIntro.thinking ? (getLanguage() === 'ja' ? '思考中... もうすぐ紹介文が完成します' : 'Thinking... Almost ready') : t('featureIntro.generating')}</p>
                             <p className="local-llm-indicator">🤖 {getLanguage() === 'ja' ? 'ローカルLLMで生成中...' : 'Generating with Local LLM...'}</p>
                         </div>
                     )}
 
-                    {isGenerating && introText !== '' && (
-                        <div className="local-llm-indicator-small">
+                    {isGenerating && parsedIntro.text && (
+                        <div className="local-llm-indicator-small" style={{ marginBottom: '8px' }}>
                             🤖 {getLanguage() === 'ja' ? 'ローカルLLMで生成中...' : 'Generating with Local LLM...'}
                         </div>
                     )}
 
-                    {introText && (
+                    {/* Main introduction content */}
+                    {parsedIntro.text && (
                         <div className="intro-message">
                             <ReactMarkdown
                                 remarkPlugins={[remarkMath]}
@@ -107,7 +143,7 @@ const FeatureIntro = ({ onComplete, onSkip, generateIntro }) => {
                                     }
                                 }}
                             >
-                                {introText}
+                                {parsedIntro.text}
                             </ReactMarkdown>
                         </div>
                     )}
